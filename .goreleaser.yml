@@ -101,9 +101,6 @@ brews:
       name: goreleaserbot
       email: bot@goreleaser.com
     commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    dependencies:
-      - name: go
-        type: build
     install: |
       bin.install "ccrider"
     test: |
