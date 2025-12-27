@@ -39,6 +39,14 @@ type ListRecentSessionsArgs struct {
 	Project string `json:"project,omitempty" jsonschema:"description=Filter by project path"`
 }
 
+// GetSessionMessagesArgs defines arguments for the get_session_messages tool
+type GetSessionMessagesArgs struct {
+	SessionID      string `json:"session_id" jsonschema:"description=Session UUID to retrieve messages from,required"`
+	LastN          int    `json:"last_n,omitempty" jsonschema:"description=Return last N messages (tail mode)"`
+	AroundSequence int    `json:"around_sequence,omitempty" jsonschema:"description=Return messages around this sequence number (from search results)"`
+	ContextSize    int    `json:"context_size,omitempty" jsonschema:"description=Messages before/after around_sequence (default: 10)"`
+}
+
 // SessionMatch represents a session search result
 type SessionMatch struct {
 	SessionID  string         `json:"session_id"`
@@ -84,6 +92,15 @@ type SessionSummary struct {
 	Project      string `json:"project"`
 	UpdatedAt    string `json:"updated_at"`
 	MessageCount int    `json:"message_count"`
+}
+
+// SessionMessagesResponse represents the response from get_session_messages
+type SessionMessagesResponse struct {
+	SessionID    string          `json:"session_id"`
+	TotalCount   int             `json:"total_count"`
+	ReturnedFrom int             `json:"returned_from"` // First sequence in response
+	ReturnedTo   int             `json:"returned_to"`   // Last sequence in response
+	Messages     []MessageDetail `json:"messages"`
 }
 
 // StartServer starts the MCP server
@@ -146,6 +163,21 @@ func StartServer(dbPath string) error {
 			mcp.Description("Filter by project path")),
 	)
 	s.AddTool(listTool, makeListRecentSessionsHandler(database))
+
+	// Register get_session_messages tool
+	messagesTool := mcp.NewTool("get_session_messages",
+		mcp.WithDescription("Get messages from a Claude Code session. Use last_n for tail (e.g., 'where were we'), around_sequence for context around a search match, or neither for full transcript."),
+		mcp.WithString("session_id",
+			mcp.Required(),
+			mcp.Description("Session UUID to retrieve messages from")),
+		mcp.WithNumber("last_n",
+			mcp.Description("Return last N messages (tail mode, for 'where were we' or 'refresh memory')")),
+		mcp.WithNumber("around_sequence",
+			mcp.Description("Return messages around this sequence number (use with search results that include sequence)")),
+		mcp.WithNumber("context_size",
+			mcp.Description("Messages before/after around_sequence (default: 10)")),
+	)
+	s.AddTool(messagesTool, makeGetSessionMessagesHandler(database))
 
 	return server.ServeStdio(s)
 }
@@ -224,7 +256,7 @@ func makeSearchSessionsHandler(database *db.DB) func(context.Context, mcp.CallTo
 				result.Matches = append(result.Matches, MatchSnippet{
 					MessageType: "message",
 					Snippet:     match.MessageText,
-					Sequence:    0,
+					Sequence:    match.Sequence,
 				})
 			}
 
@@ -372,6 +404,66 @@ func makeListRecentSessionsHandler(database *db.DB) func(context.Context, mcp.Ca
 		resultJSON, err := json.Marshal(map[string]interface{}{
 			"sessions": sessions,
 		})
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(string(resultJSON)), nil
+	}
+}
+
+func makeGetSessionMessagesHandler(database *db.DB) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Sync database before running query
+		if err := syncDatabase(ctx, database); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("sync failed: %v", err)), nil
+		}
+
+		var args GetSessionMessagesArgs
+		argsBytes, _ := json.Marshal(request.Params.Arguments)
+		if err := json.Unmarshal(argsBytes, &args); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
+
+		// Convert to core options
+		opts := db.GetSessionMessagesOptions{
+			LastN:          args.LastN,
+			AroundSequence: args.AroundSequence,
+			ContextSize:    args.ContextSize,
+		}
+
+		// Call core function
+		messages, totalCount, err := database.GetSessionMessages(args.SessionID, opts)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get messages: %v", err)), nil
+		}
+
+		// Convert to MCP format
+		var mcpMessages []MessageDetail
+		var returnedFrom, returnedTo int
+		for i, msg := range messages {
+			if i == 0 {
+				returnedFrom = msg.Sequence
+			}
+			returnedTo = msg.Sequence
+
+			mcpMessages = append(mcpMessages, MessageDetail{
+				Type:      msg.Type,
+				Content:   msg.Content,
+				Timestamp: msg.Timestamp.Format("2006-01-02 15:04:05"),
+				Sequence:  msg.Sequence,
+			})
+		}
+
+		response := SessionMessagesResponse{
+			SessionID:    args.SessionID,
+			TotalCount:   totalCount,
+			ReturnedFrom: returnedFrom,
+			ReturnedTo:   returnedTo,
+			Messages:     mcpMessages,
+		}
+
+		resultJSON, err := json.Marshal(response)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
 		}

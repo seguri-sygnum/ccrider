@@ -19,6 +19,7 @@ type SearchResult struct {
 	MessageText    string
 	Timestamp      string
 	ProjectPath    string
+	Sequence       int // Message sequence number within session
 }
 
 // SearchFilters defines filtering criteria for search
@@ -161,7 +162,8 @@ func search(database *db.DB, query string, ftsTable string, limit int) ([]Search
 				COALESCE(ss.one_line_summary, s.llm_summary, s.summary, ''),
 				m.text_content,
 				m.timestamp,
-				s.project_path
+				s.project_path,
+				m.sequence
 			FROM messages m
 			JOIN sessions s ON s.id = m.session_id
 			LEFT JOIN session_summaries ss ON s.id = ss.session_id
@@ -180,7 +182,8 @@ func search(database *db.DB, query string, ftsTable string, limit int) ([]Search
 				COALESCE(ss.one_line_summary, s.llm_summary, s.summary, ''),
 				snippet(%s, -1, '', '', '...', 64) as snippet,
 				m.timestamp,
-				s.project_path
+				s.project_path,
+				m.sequence
 			FROM %s
 			JOIN messages m ON %s.rowid = m.id
 			JOIN sessions s ON s.id = m.session_id
@@ -207,6 +210,7 @@ func search(database *db.DB, query string, ftsTable string, limit int) ([]Search
 			&r.MessageText,
 			&r.Timestamp,
 			&r.ProjectPath,
+			&r.Sequence,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}

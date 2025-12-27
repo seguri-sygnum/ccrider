@@ -256,4 +256,98 @@ type SessionMessage struct {
 	Sender    string
 	Content   string
 	Timestamp time.Time
+	Sequence  int
+}
+
+// GetSessionMessagesOptions specifies filtering options for GetSessionMessages
+type GetSessionMessagesOptions struct {
+	LastN          int // Return last N messages (tail mode)
+	AroundSequence int // Return messages around this sequence number
+	ContextSize    int // Messages before/after AroundSequence (default 10)
+}
+
+// GetSessionMessages returns messages from a session with optional filtering
+// - LastN > 0: returns last N messages
+// - AroundSequence > 0: returns messages around that sequence (±ContextSize)
+// - Neither: returns all messages
+func (db *DB) GetSessionMessages(sessionID string, opts GetSessionMessagesOptions) ([]SessionMessage, int, error) {
+	// First get total message count
+	var totalCount int
+	err := db.QueryRow(`
+		SELECT COUNT(*) FROM messages
+		WHERE session_id = (SELECT id FROM sessions WHERE session_id = ?)
+	`, sessionID).Scan(&totalCount)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Build query based on options
+	var query string
+	var args []interface{}
+
+	if opts.LastN > 0 {
+		// Tail mode: get last N messages
+		query = `
+			SELECT type, sender, text_content, timestamp, sequence
+			FROM messages
+			WHERE session_id = (SELECT id FROM sessions WHERE session_id = ?)
+			ORDER BY sequence DESC
+			LIMIT ?
+		`
+		args = []interface{}{sessionID, opts.LastN}
+	} else if opts.AroundSequence > 0 {
+		// Context mode: get messages around a sequence number
+		contextSize := opts.ContextSize
+		if contextSize <= 0 {
+			contextSize = 10
+		}
+		startSeq := opts.AroundSequence - contextSize
+		if startSeq < 0 {
+			startSeq = 0
+		}
+		endSeq := opts.AroundSequence + contextSize
+
+		query = `
+			SELECT type, sender, text_content, timestamp, sequence
+			FROM messages
+			WHERE session_id = (SELECT id FROM sessions WHERE session_id = ?)
+			  AND sequence >= ? AND sequence <= ?
+			ORDER BY sequence ASC
+		`
+		args = []interface{}{sessionID, startSeq, endSeq}
+	} else {
+		// All messages
+		query = `
+			SELECT type, sender, text_content, timestamp, sequence
+			FROM messages
+			WHERE session_id = (SELECT id FROM sessions WHERE session_id = ?)
+			ORDER BY sequence ASC
+		`
+		args = []interface{}{sessionID}
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var messages []SessionMessage
+	for rows.Next() {
+		var msg SessionMessage
+		err := rows.Scan(&msg.Type, &msg.Sender, &msg.Content, &msg.Timestamp, &msg.Sequence)
+		if err != nil {
+			return nil, 0, err
+		}
+		messages = append(messages, msg)
+	}
+
+	// For LastN, we selected DESC so reverse to get chronological order
+	if opts.LastN > 0 {
+		for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+			messages[i], messages[j] = messages[j], messages[i]
+		}
+	}
+
+	return messages, totalCount, rows.Err()
 }
