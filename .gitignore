@@ -38,3 +38,6 @@ bin/
 # Test coverage
 *.coverprofile
 coverage.html
+
+# Session exports
+session-*.md
