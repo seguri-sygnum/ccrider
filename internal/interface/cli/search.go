@@ -3,7 +3,9 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/neilberkman/ccrider/internal/core/db"
 	"github.com/neilberkman/ccrider/internal/core/search"
 	"github.com/spf13/cobra"
@@ -84,15 +86,13 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		sessionCount++
 
 		fmt.Printf("=== Session %d ===\n", sessionCount)
-		fmt.Printf("ID:      %s\n", session.SessionID)
 		if session.SessionSummary != "" {
-			fmt.Printf("Summary: %s\n", session.SessionSummary)
+			fmt.Printf("%s\n", session.SessionSummary)
 		} else {
-			fmt.Printf("Summary: [No summary - showing first match]\n")
+			fmt.Printf("[No summary]\n")
 		}
-		fmt.Printf("Project: %s\n", session.ProjectPath)
-		fmt.Printf("Updated: %s\n", session.UpdatedAt)
-		fmt.Printf("Matches: %d\n", len(session.Matches))
+		fmt.Printf("%s | %d msgs | %s | %d matches\n",
+			session.LastCwd, session.MessageCount, formatTimeAgo(session.UpdatedAt), len(session.Matches))
 		fmt.Println()
 
 		// Show up to 3 matches per session
@@ -127,4 +127,17 @@ func truncateMessage(msg string, maxLen int) string {
 	}
 
 	return truncated + "..."
+}
+
+// formatTimeAgo formats a timestamp as relative time (e.g., "2 hours ago")
+func formatTimeAgo(t string) string {
+	parsed, err := time.Parse(time.RFC3339, t)
+	if err != nil {
+		// Try without timezone
+		parsed, err = time.Parse("2006-01-02 15:04:05", t)
+		if err != nil {
+			return t
+		}
+	}
+	return humanize.Time(parsed)
 }

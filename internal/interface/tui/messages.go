@@ -52,9 +52,10 @@ func performSearch(database *db.DB, query string) tea.Cmd {
 		// Parse filters from query (interface concern - normalizing user input)
 		tuiFilters := ParseSearchQuery(query)
 		searchQuery := tuiFilters.Query
-		if searchQuery == "" {
-			searchQuery = query // Fallback if only filters
-		}
+
+		// If we have filters but no query text, that's fine - search will return
+		// empty results which is appropriate (need both filters AND search text)
+		// Don't fall back to raw query as it would try to FTS search "after:yesterday"
 
 		// Convert TUI filters to core filters
 		coreFilters := search.SearchFilters{

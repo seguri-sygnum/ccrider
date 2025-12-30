@@ -19,6 +19,8 @@ type SearchResult struct {
 	MessageText    string
 	Timestamp      string
 	ProjectPath    string
+	LastCwd        string
+	MessageCount   int
 	Sequence       int // Message sequence number within session
 }
 
@@ -37,7 +39,9 @@ type SessionSearchResult struct {
 	SessionID      string
 	SessionSummary string
 	ProjectPath    string
+	LastCwd        string
 	UpdatedAt      string
+	MessageCount   int
 	Matches        []SearchResult
 	Score          float64 // Relevance score for ranking
 }
@@ -54,8 +58,15 @@ func Search(database *db.DB, query string) ([]SearchResult, error) {
 // SearchWithFilters performs filtered search and groups results by session
 // This consolidates business logic that was duplicated across TUI and MCP
 func SearchWithFilters(database *db.DB, filters SearchFilters) ([]SessionSearchResult, error) {
-	// Validate query (minimum 2 characters)
 	query := strings.TrimSpace(filters.Query)
+	hasFilters := filters.AfterDate != "" || filters.BeforeDate != "" || filters.ProjectPath != ""
+
+	// If no query but has filters, do filter-only search (no FTS)
+	if len(query) < 2 && hasFilters {
+		return filterOnlySessions(database, filters)
+	}
+
+	// Require minimum 2 characters for text search
 	if len(query) < 2 {
 		return nil, nil // Empty results for queries too short
 	}
@@ -102,7 +113,9 @@ func SearchWithFilters(database *db.DB, filters SearchFilters) ([]SessionSearchR
 				SessionID:      sessionID,
 				SessionSummary: result.SessionSummary,
 				ProjectPath:    result.ProjectPath,
+				LastCwd:        result.LastCwd,
 				UpdatedAt:      result.Timestamp,
+				MessageCount:   result.MessageCount,
 				Matches:        []SearchResult{},
 			}
 			sessionMap[sessionID] = session
@@ -163,6 +176,8 @@ func search(database *db.DB, query string, ftsTable string, limit int) ([]Search
 				m.text_content,
 				m.timestamp,
 				s.project_path,
+				COALESCE(s.cwd, s.project_path),
+				s.message_count,
 				m.sequence
 			FROM messages m
 			JOIN sessions s ON s.id = m.session_id
@@ -183,6 +198,8 @@ func search(database *db.DB, query string, ftsTable string, limit int) ([]Search
 				snippet(%s, -1, '', '', '...', 64) as snippet,
 				m.timestamp,
 				s.project_path,
+				COALESCE(s.cwd, s.project_path),
+				s.message_count,
 				m.sequence
 			FROM %s
 			JOIN messages m ON %s.rowid = m.id
@@ -210,6 +227,8 @@ func search(database *db.DB, query string, ftsTable string, limit int) ([]Search
 			&r.MessageText,
 			&r.Timestamp,
 			&r.ProjectPath,
+			&r.LastCwd,
+			&r.MessageCount,
 			&r.Sequence,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
@@ -433,4 +452,63 @@ func calculateRelevanceScore(query string, session *SessionSearchResult, now tim
 	}
 
 	return score
+}
+
+// filterOnlySessions returns sessions matching date/project filters without text search
+func filterOnlySessions(database *db.DB, filters SearchFilters) ([]SessionSearchResult, error) {
+	// Build query with optional filters
+	query := `
+		SELECT
+			s.session_id,
+			COALESCE(ss.one_line_summary, s.llm_summary, s.summary, ''),
+			s.project_path,
+			COALESCE(s.cwd, s.project_path),
+			s.updated_at,
+			s.message_count
+		FROM sessions s
+		LEFT JOIN session_summaries ss ON s.id = ss.session_id
+		WHERE 1=1
+	`
+	var args []interface{}
+
+	if filters.ProjectPath != "" {
+		query += " AND s.project_path LIKE '%' || ? || '%'"
+		args = append(args, filters.ProjectPath)
+	}
+	if filters.AfterDate != "" {
+		query += " AND s.updated_at >= ?"
+		args = append(args, filters.AfterDate)
+	}
+	if filters.BeforeDate != "" {
+		query += " AND s.updated_at <= ?"
+		args = append(args, filters.BeforeDate)
+	}
+
+	query += " ORDER BY s.updated_at DESC LIMIT 100"
+
+	rows, err := database.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("filter query failed: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var results []SessionSearchResult
+	for rows.Next() {
+		var r SessionSearchResult
+		if err := rows.Scan(
+			&r.SessionID,
+			&r.SessionSummary,
+			&r.ProjectPath,
+			&r.LastCwd,
+			&r.UpdatedAt,
+			&r.MessageCount,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan session: %w", err)
+		}
+		// No matches for filter-only results
+		r.Matches = []SearchResult{}
+		results = append(results, r)
+	}
+
+	return results, nil
 }

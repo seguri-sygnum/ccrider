@@ -81,13 +81,8 @@ func ParseSearchQuery(query string) SearchFilters {
 
 // parseDate attempts to parse a date string using natural language parsing
 func parseDate(w *when.Parser, dateStr string) *time.Time {
-	// Try natural language parsing first
-	result, err := w.Parse(dateStr, time.Now())
-	if err == nil && result != nil {
-		return &result.Time
-	}
-
-	// Try standard formats
+	// Try standard date formats FIRST (before natural language)
+	// This prevents "2024-11-01" from being parsed as time "11:01"
 	formats := []string{
 		"2006-01-02",
 		"2006-01-02T15:04:05",
@@ -100,6 +95,16 @@ func parseDate(w *when.Parser, dateStr string) *time.Time {
 		if t, err := time.Parse(format, dateStr); err == nil {
 			return &t
 		}
+	}
+
+	// Convert hyphenated format to spaces for natural language parsing
+	// "3-days-ago" -> "3 days ago"
+	normalizedStr := strings.ReplaceAll(dateStr, "-", " ")
+
+	// Try natural language parsing
+	result, err := w.Parse(normalizedStr, time.Now())
+	if err == nil && result != nil {
+		return &result.Time
 	}
 
 	return nil

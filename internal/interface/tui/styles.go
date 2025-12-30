@@ -47,7 +47,7 @@ var (
 				Bold(true)
 
 	searchCurrentMatchStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("46")).  // Bright green text for current match
+				Foreground(lipgloss.Color("46")). // Bright green text for current match
 				Bold(true).
 				Underline(true)
 

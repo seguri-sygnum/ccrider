@@ -20,7 +20,6 @@ var (
 	summarizeForce    bool
 	summarizeModel    string
 	summarizeRegion   string
-	summarizeProfile  string
 	summarizeVerbose  bool
 	summarizeExtract  bool
 	summarizeProvider string

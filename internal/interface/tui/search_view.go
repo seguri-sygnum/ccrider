@@ -80,14 +80,29 @@ func (m Model) viewSearch() string {
 		b.WriteString("\n\n")
 
 		// Calculate max results based on screen height
-		// Each result takes ~7 lines (header + project + 3 matches + spacing)
-		// Reserve: 4 for header, 4 for footer = 8 total
-		linesPerResult := 7
-		availableHeight := m.height - 8
-		maxVisibleResults := availableHeight / linesPerResult
+		// Reserve: 5 for header (Search + divider + blank + "Found N" + blank)
+		//          5 for footer (scroll indicators + blank + help + filters)
+		availableHeight := m.height - 10
+		if availableHeight < 10 {
+			availableHeight = 10 // Fallback if height not set
+		}
 
+		// Estimate lines per result based on whether we have matches
+		// With matches: ~7 lines (header + project + 3 matches + spacing)
+		// Without matches (filter-only): ~3 lines (header + project + spacing)
+		hasMatches := len(m.searchResults) > 0 && len(m.searchResults[0].Matches) > 0
+		linesPerResult := 3
+		if hasMatches {
+			linesPerResult = 7
+		}
+
+		maxVisibleResults := availableHeight / linesPerResult
 		if maxVisibleResults < 2 {
 			maxVisibleResults = 2
+		}
+		// Hard cap - summaries can wrap, so be conservative
+		if maxVisibleResults > 6 {
+			maxVisibleResults = 6
 		}
 
 		// Calculate visible window
@@ -110,6 +125,17 @@ func (m Model) viewSearch() string {
 				summary = "[No summary]"
 			}
 
+			// Calculate max summary length to fit on one line
+			// Format: "► summary (N matches) | time ago"
+			// Reserve: 4 for prefix, ~20 for match count, ~15 for time = ~40
+			maxSummaryLen := m.width - 40
+			if maxSummaryLen < 30 {
+				maxSummaryLen = 30
+			}
+			if len(summary) > maxSummaryLen {
+				summary = summary[:maxSummaryLen-3] + "..."
+			}
+
 			// Add selection indicator
 			prefix := "  "
 			if isSelected {
@@ -125,7 +151,13 @@ func (m Model) viewSearch() string {
 			updatedTime := formatTime(result.UpdatedAt)
 			b.WriteString(fmt.Sprintf("%s%s %s | %s\n", prefix, summary,
 				searchMetaStyle.Render(matchCount), searchMetaStyle.Render(updatedTime)))
-			b.WriteString(fmt.Sprintf("  %s\n", searchMetaStyle.Render(result.Project)))
+
+			// Truncate project path too
+			project := result.Project
+			if len(project) > m.width-4 {
+				project = "..." + project[len(project)-(m.width-7):]
+			}
+			b.WriteString(fmt.Sprintf("  %s\n", searchMetaStyle.Render(project)))
 
 			// Show each match with clear separation
 			query := m.searchInput.Value()

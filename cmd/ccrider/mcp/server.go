@@ -102,10 +102,10 @@ type SessionSummary struct {
 type SessionMessagesResponse struct {
 	SessionID        string          `json:"session_id"`
 	TotalCount       int             `json:"total_count"`
-	ReturnedFrom     int             `json:"returned_from"`              // First sequence in response
-	ReturnedTo       int             `json:"returned_to"`                // Last sequence in response
+	ReturnedFrom     int             `json:"returned_from"` // First sequence in response
+	ReturnedTo       int             `json:"returned_to"`   // Last sequence in response
 	Messages         []MessageDetail `json:"messages"`
-	Truncated        bool            `json:"truncated,omitempty"`        // True if response was truncated
+	Truncated        bool            `json:"truncated,omitempty"`         // True if response was truncated
 	TruncatedMessage string          `json:"truncated_message,omitempty"` // Explanation when truncated
 }
 

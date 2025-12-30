@@ -89,10 +89,10 @@ func createSessionList(sessions []sessionItem, width, height int) list.Model {
 	}
 
 	l := list.New(items, delegate, width, listHeight)
-	l.Title = "" // No title
-	l.SetShowStatusBar(false) // No status bar
-	l.SetShowHelp(false) // No built-in help
-	l.SetShowTitle(false) // No title rendering
+	l.Title = ""                 // No title
+	l.SetShowStatusBar(false)    // No status bar
+	l.SetShowHelp(false)         // No built-in help
+	l.SetShowTitle(false)        // No title rendering
 	l.SetFilteringEnabled(false) // Disable built-in filter (we have dedicated search with /)
 
 	// Disable paginator entirely to remove bottom spacing

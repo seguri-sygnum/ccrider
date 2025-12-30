@@ -23,7 +23,7 @@ type AnthropicConfig struct {
 // NewAnthropicProvider creates a new Anthropic API provider
 func NewAnthropicProvider(cfg AnthropicConfig) (*AnthropicProvider, error) {
 	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("Anthropic API key is required")
+		return nil, fmt.Errorf("anthropic API key is required")
 	}
 	if cfg.ModelID == "" {
 		cfg.ModelID = "claude-haiku-4-5-20251001"
