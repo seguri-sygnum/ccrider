@@ -212,11 +212,13 @@ type summarizeSessionInfo struct {
 
 func getSummarizableSessions(database *db.DB, limit int, force bool) ([]summarizeSessionInfo, error) {
 	var query string
+	// Minimum 5 messages to be worth summarizing
+	minMessages := 5
 	if force {
 		query = `
 			SELECT s.id, s.session_id, s.project_path
 			FROM sessions s
-			WHERE s.message_count > 0
+			WHERE s.message_count >= ?
 			ORDER BY s.updated_at DESC
 			LIMIT ?
 		`
@@ -225,13 +227,12 @@ func getSummarizableSessions(database *db.DB, limit int, force bool) ([]summariz
 			SELECT s.id, s.session_id, s.project_path
 			FROM sessions s
 			LEFT JOIN session_summaries ss ON s.id = ss.session_id
-			WHERE s.message_count > 0 AND (ss.session_id IS NULL OR s.message_count > ss.last_message_count)
+			WHERE s.message_count >= ? AND (ss.session_id IS NULL OR s.message_count > ss.last_message_count)
 			ORDER BY s.updated_at DESC
 			LIMIT ?
 		`
 	}
-
-	rows, err := database.Query(query, limit)
+	rows, err := database.Query(query, minMessages, limit)
 	if err != nil {
 		return nil, err
 	}
