@@ -36,6 +36,10 @@ go build -o ccrider cmd/ccrider/main.go
 sudo mv ccrider /usr/local/bin/
 ```
 
+_"Vibe code like ~a king~ The King!"_
+
+https://github.com/user-attachments/assets/5b008290-076e-4323-a775-f27f704b1ff2
+
 ## Core Features
 
 ### 1. Interactive TUI Browser
@@ -83,10 +87,6 @@ ccrider sync --full  # Re-import everything
 ```
 
 Detects ongoing sessions and imports new messages without re-processing everything.
-
-_"Vibe code like ~a king~ The King!"_
-
-https://github.com/user-attachments/assets/5b008290-076e-4323-a775-f27f704b1ff2
 
 ---
 
