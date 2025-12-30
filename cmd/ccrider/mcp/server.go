@@ -47,6 +47,10 @@ type GetSessionMessagesArgs struct {
 	ContextSize    int    `json:"context_size,omitempty" jsonschema:"description=Messages before/after around_sequence (default: 10)"`
 }
 
+// MaxResponseBytes is the hard limit on response size to prevent context overflow
+// ~50KB is roughly 12-15k tokens, a reasonable chunk that won't blow up context
+const MaxResponseBytes = 50000
+
 // SessionMatch represents a session search result
 type SessionMatch struct {
 	SessionID  string         `json:"session_id"`
@@ -96,11 +100,13 @@ type SessionSummary struct {
 
 // SessionMessagesResponse represents the response from get_session_messages
 type SessionMessagesResponse struct {
-	SessionID    string          `json:"session_id"`
-	TotalCount   int             `json:"total_count"`
-	ReturnedFrom int             `json:"returned_from"` // First sequence in response
-	ReturnedTo   int             `json:"returned_to"`   // Last sequence in response
-	Messages     []MessageDetail `json:"messages"`
+	SessionID        string          `json:"session_id"`
+	TotalCount       int             `json:"total_count"`
+	ReturnedFrom     int             `json:"returned_from"`              // First sequence in response
+	ReturnedTo       int             `json:"returned_to"`                // Last sequence in response
+	Messages         []MessageDetail `json:"messages"`
+	Truncated        bool            `json:"truncated,omitempty"`        // True if response was truncated
+	TruncatedMessage string          `json:"truncated_message,omitempty"` // Explanation when truncated
 }
 
 // StartServer starts the MCP server
@@ -438,21 +444,41 @@ func makeGetSessionMessagesHandler(database *db.DB) func(context.Context, mcp.Ca
 			return mcp.NewToolResultError(fmt.Sprintf("failed to get messages: %v", err)), nil
 		}
 
-		// Convert to MCP format
+		// Convert to MCP format and calculate total size
 		var mcpMessages []MessageDetail
-		var returnedFrom, returnedTo int
-		for i, msg := range messages {
-			if i == 0 {
-				returnedFrom = msg.Sequence
-			}
-			returnedTo = msg.Sequence
-
+		totalBytes := 0
+		for _, msg := range messages {
 			mcpMessages = append(mcpMessages, MessageDetail{
 				Type:      msg.Type,
 				Content:   msg.Content,
 				Timestamp: msg.Timestamp.Format("2006-01-02 15:04:05"),
 				Sequence:  msg.Sequence,
 			})
+			totalBytes += len(msg.Content)
+		}
+
+		// Truncate evenly from beginning/end if over byte limit
+		truncated := false
+		originalCount := len(mcpMessages)
+		for totalBytes > MaxResponseBytes && len(mcpMessages) > 2 {
+			truncated = true
+			// Remove from both ends evenly
+			frontSize := len(mcpMessages[0].Content)
+			backSize := len(mcpMessages[len(mcpMessages)-1].Content)
+
+			if frontSize >= backSize {
+				totalBytes -= frontSize
+				mcpMessages = mcpMessages[1:]
+			} else {
+				totalBytes -= backSize
+				mcpMessages = mcpMessages[:len(mcpMessages)-1]
+			}
+		}
+
+		var returnedFrom, returnedTo int
+		if len(mcpMessages) > 0 {
+			returnedFrom = mcpMessages[0].Sequence
+			returnedTo = mcpMessages[len(mcpMessages)-1].Sequence
 		}
 
 		response := SessionMessagesResponse{
@@ -461,6 +487,12 @@ func makeGetSessionMessagesHandler(database *db.DB) func(context.Context, mcp.Ca
 			ReturnedFrom: returnedFrom,
 			ReturnedTo:   returnedTo,
 			Messages:     mcpMessages,
+		}
+
+		// Add truncation warning if applicable
+		if truncated {
+			response.Truncated = true
+			response.TruncatedMessage = fmt.Sprintf("Response truncated to ~%dKB (%d of %d messages). Use last_n or around_sequence for targeted retrieval.", totalBytes/1000, len(mcpMessages), originalCount)
 		}
 
 		resultJSON, err := json.Marshal(response)
