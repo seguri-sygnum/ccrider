@@ -26,8 +26,11 @@ Stay in your terminal. Find any conversation. Resume where you left off.
 **Installation:**
 
 ```bash
-# From source (releases coming soon)
-git clone https://github.com/you/ccrider.git
+# Homebrew (recommended)
+brew install neilberkman/tap/ccrider
+
+# Or from source
+git clone https://github.com/neilberkman/ccrider.git
 cd ccrider
 go build -o ccrider cmd/ccrider/main.go
 sudo mv ccrider /usr/local/bin/
@@ -125,9 +128,10 @@ Add to your config (`~/Library/Application Support/Claude/claude_desktop_config.
 
 ### Available Tools
 
-- **get_session_detail** - Retrieve full conversation for a specific session
-- **list_recent_sessions** - Get recent sessions, optionally filtered by project
 - **search_sessions** - Full-text search across all session content with date/project filters
+- **list_recent_sessions** - Get recent sessions, optionally filtered by project
+- **get_session_detail** - Retrieve session info with first/last messages and optional search
+- **get_session_messages** - Get messages from a session (supports tail mode, context around search matches)
 
 The MCP server provides read-only access to your session database. Your conversations stay local.
 
@@ -135,15 +139,21 @@ The MCP server provides read-only access to your session database. Your conversa
 
 ## Configuration
 
-ccrider looks for config at `~/.config/ccrider/config.toml`:
+ccrider looks for config in `~/.config/ccrider/`:
 
 ```toml
-# Skip permission prompts (use with caution)
-dangerously_skip_permissions = true
+# config.toml - pass additional flags to claude --resume
+claude_flags = ["--dangerously-skip-permissions"]
+```
 
-# Custom terminal command for 'o' key
+```txt
+# terminal_command.txt - custom command for 'o' key
 # Available placeholders: {cwd}, {command}
-terminal_command = "wezterm cli spawn --cwd {cwd} -- {command}"
+wezterm cli spawn --cwd {cwd} -- {command}
+```
+
+```txt
+# resume_prompt.txt - customize the prompt sent when resuming sessions
 ```
 
 See [CONFIGURATION.md](docs/CONFIGURATION.md) for full details.
@@ -190,17 +200,17 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 ### Project Structure
 
 ```
-cmd/ccrider/          # CLI entry point
+cmd/ccrider/          # CLI entry point + MCP server
 internal/
-  core/               # Business logic
+  core/               # Business logic (no UI concerns)
     db/               # Database operations
-    parser/           # JSON parsing
-    sync/             # Session synchronization
-  interface/          # UI/interface code
+    importer/         # Session import/sync
+    search/           # Full-text search
+    session/          # Session launch logic
+  interface/          # Thin UI wrappers
     cli/              # Command handlers
-    tui/              # Terminal UI
-    mcp/              # MCP server
-pkg/                  # Public libraries (none yet)
+    tui/              # Terminal UI (bubbletea)
+pkg/ccsessions/       # Session file parser (public API)
 ```
 
 ### Quick Build

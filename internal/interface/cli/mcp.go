@@ -13,7 +13,10 @@ var mcpCmd = &cobra.Command{
 	Long: `Start an MCP (Model Context Protocol) server that allows Claude Code
 to search and retrieve information from your session history.
 
-Configure in Claude Desktop's config file (~/.config/claude/config.json):
+For Claude Code:
+  claude mcp add --scope user ccrider $(which ccrider) serve-mcp
+
+For Claude Desktop (~/Library/Application Support/Claude/claude_desktop_config.json):
   {
     "mcpServers": {
       "ccrider": {
