@@ -84,7 +84,9 @@ ccrider sync --full  # Re-import everything
 
 Detects ongoing sessions and imports new messages without re-processing everything.
 
-[![](https://img.youtube.com/vi/6W-sNKa80QA/0.jpg)](https://youtu.be/6W-sNKa80QA?si=mz55F2_xipjZrFBq&t=22)
+_"Vibe code like ~a king~ The King!"_
+
+https://github.com/user-attachments/assets/5b008290-076e-4323-a775-f27f704b1ff2
 
 ---
 
