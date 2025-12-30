@@ -32,8 +32,9 @@ func NewBedrockProvider(ctx context.Context, cfg BedrockConfig) (*BedrockProvide
 		cfg.Region = "us-east-1"
 	}
 	if cfg.ModelID == "" {
-		// Default to Haiku for cost-effective summarization
-		cfg.ModelID = "anthropic.claude-3-haiku-20240307-v1:0"
+		// Default to Haiku 4.5 for cost-effective summarization
+		// Uses global inference profile for cross-region availability
+		cfg.ModelID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 	}
 
 	// Load AWS config
@@ -85,4 +86,9 @@ func (p *BedrockProvider) GenerateText(ctx context.Context, prompt string) (stri
 // Name implements Provider
 func (p *BedrockProvider) Name() string {
 	return "bedrock"
+}
+
+// ModelID returns the model being used
+func (p *BedrockProvider) ModelID() string {
+	return p.modelID
 }

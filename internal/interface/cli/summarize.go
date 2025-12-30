@@ -5,25 +5,25 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/neilberkman/ccrider/internal/core/config"
 	"github.com/neilberkman/ccrider/internal/core/db"
 	"github.com/neilberkman/ccrider/internal/core/llm"
 	"github.com/spf13/cobra"
 )
 
-// Env vars for Bedrock credentials (so you don't put them on command line)
-// CCRIDER_AWS_ACCESS_KEY_ID
-// CCRIDER_AWS_SECRET_ACCESS_KEY
-// CCRIDER_AWS_REGION
-// CCRIDER_AWS_PROFILE
+// Env vars for credentials:
+// ANTHROPIC_API_KEY - Anthropic API key
+// AWS credentials - standard AWS env vars or CCRIDER_AWS_* variants
 
 var (
-	summarizeLimit   int
-	summarizeForce   bool
-	summarizeModel   string
-	summarizeRegion  string
-	summarizeProfile string
-	summarizeVerbose bool
-	summarizeExtract bool
+	summarizeLimit    int
+	summarizeForce    bool
+	summarizeModel    string
+	summarizeRegion   string
+	summarizeProfile  string
+	summarizeVerbose  bool
+	summarizeExtract  bool
+	summarizeProvider string
 )
 
 var summarizeCmd = &cobra.Command{
@@ -37,21 +37,26 @@ Features:
 - Metadata extraction: issue IDs (ENA-1234) and file paths
 - Incremental updates when sessions grow
 
-Currently supports AWS Bedrock with Claude models. Requires AWS credentials
-to be configured (via environment, profile, or IAM role).
+Supports two LLM providers:
+- Anthropic API: Set ANTHROPIC_API_KEY environment variable
+- AWS Bedrock: Configure AWS credentials (env vars, profile, or IAM role)
+
+Provider is auto-detected from available credentials, or set explicitly via
+--provider flag or llm_provider in ~/.config/ccrider/config.toml
 
 Examples:
-  # Summarize sessions without summaries (default: 10 at a time)
+  # Summarize sessions (auto-detects provider)
   ccrider summarize
+
+  # Use specific provider
+  ccrider summarize --provider anthropic
+  ccrider summarize --provider bedrock
 
   # Summarize more sessions
   ccrider summarize --limit 50
 
   # Re-summarize all sessions (overwrite existing)
   ccrider summarize --force --limit 100
-
-  # Use a specific model
-  ccrider summarize --model anthropic.claude-3-sonnet-20240229-v1:0
 
   # Extract metadata only (no LLM calls)
   ccrider summarize --extract-only`,
@@ -61,8 +66,9 @@ Examples:
 func init() {
 	summarizeCmd.Flags().IntVarP(&summarizeLimit, "limit", "n", 10, "Number of sessions to summarize")
 	summarizeCmd.Flags().BoolVarP(&summarizeForce, "force", "f", false, "Re-summarize sessions that already have summaries")
-	summarizeCmd.Flags().StringVar(&summarizeModel, "model", "", "Bedrock model ID (default: claude-3-haiku)")
-	summarizeCmd.Flags().StringVar(&summarizeRegion, "region", "", "AWS region (default: us-east-1)")
+	summarizeCmd.Flags().StringVar(&summarizeProvider, "provider", "", "LLM provider: anthropic or bedrock (auto-detected if not set)")
+	summarizeCmd.Flags().StringVar(&summarizeModel, "model", "", "Model ID (provider-specific, defaults to claude-3-haiku)")
+	summarizeCmd.Flags().StringVar(&summarizeRegion, "region", "", "AWS region for Bedrock (default: us-east-1)")
 	summarizeCmd.Flags().BoolVarP(&summarizeVerbose, "verbose", "v", false, "Show verbose output")
 	summarizeCmd.Flags().BoolVar(&summarizeExtract, "extract-only", false, "Only extract metadata (issue IDs, files), no LLM calls")
 
@@ -95,36 +101,12 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 
 	var summarizer *llm.HierarchicalSummarizer
 	if !summarizeExtract {
-		// Check env vars for AWS credentials
-		region := summarizeRegion
-		if region == "" {
-			region = os.Getenv("CCRIDER_AWS_REGION")
-		}
-		accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
-		if v := os.Getenv("CCRIDER_AWS_ACCESS_KEY_ID"); v != "" {
-			accessKey = v
-		}
-		secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-		if v := os.Getenv("CCRIDER_AWS_SECRET_ACCESS_KEY"); v != "" {
-			secretKey = v
-		}
-		profile := summarizeProfile
-		if profile == "" {
-			profile = os.Getenv("CCRIDER_AWS_PROFILE")
-		}
-
-		provider, err := llm.NewBedrockProvider(ctx, llm.BedrockConfig{
-			Region:          region,
-			ModelID:         summarizeModel,
-			Profile:         profile,
-			AccessKeyID:     accessKey,
-			SecretAccessKey: secretKey,
-		})
+		provider, err := createLLMProvider(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to create LLM provider: %w", err)
 		}
 		summarizer = llm.NewHierarchicalSummarizer(provider)
-		fmt.Printf("Summarizing %d sessions using %s...\n", len(sessions), provider.Name())
+		fmt.Printf("Summarizing %d sessions...\n", len(sessions))
 	} else {
 		fmt.Printf("Extracting metadata from %d sessions...\n", len(sessions))
 	}
@@ -312,4 +294,116 @@ func truncateID(id string) string {
 		return id[:8]
 	}
 	return id
+}
+
+// createLLMProvider creates an LLM provider based on flags, config, or auto-detection
+func createLLMProvider(ctx context.Context) (llm.Provider, error) {
+	// Load config for provider preference
+	cfg, _ := config.Load()
+
+	// Determine provider: flag > config > auto-detect
+	provider := summarizeProvider
+	if provider == "" && cfg != nil {
+		provider = cfg.LLMProvider
+	}
+
+	// Check available credentials
+	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
+	hasAnthropic := anthropicKey != ""
+
+	// Check AWS credentials (simplified check)
+	hasAWS := os.Getenv("AWS_ACCESS_KEY_ID") != "" ||
+		os.Getenv("AWS_PROFILE") != "" ||
+		os.Getenv("AWS_DEFAULT_PROFILE") != "" ||
+		os.Getenv("CCRIDER_AWS_ACCESS_KEY_ID") != "" ||
+		os.Getenv("CCRIDER_AWS_PROFILE") != ""
+
+	// Auto-detect if no explicit provider
+	autoDetected := false
+	if provider == "" {
+		autoDetected = true
+		if hasAnthropic {
+			provider = "anthropic"
+		} else if hasAWS {
+			provider = "bedrock"
+		} else {
+			return nil, fmt.Errorf("no LLM credentials found. Set ANTHROPIC_API_KEY or configure AWS credentials")
+		}
+	}
+
+	// Create the provider
+	switch provider {
+	case "anthropic":
+		if !hasAnthropic {
+			return nil, fmt.Errorf("ANTHROPIC_API_KEY not set")
+		}
+
+		model := summarizeModel
+		if model == "" {
+			model = "claude-haiku-4-5-20251001"
+		}
+
+		if autoDetected {
+			fmt.Printf("Using Anthropic API (%s) [auto-detected from ANTHROPIC_API_KEY]\n", model)
+			fmt.Printf("  To use AWS Bedrock instead: --provider bedrock or set llm_provider in config.toml\n\n")
+		} else {
+			fmt.Printf("Using Anthropic API (%s)\n", model)
+		}
+
+		return llm.NewAnthropicProvider(llm.AnthropicConfig{
+			APIKey:  anthropicKey,
+			ModelID: model,
+		})
+
+	case "bedrock":
+		region := summarizeRegion
+		if region == "" {
+			region = os.Getenv("CCRIDER_AWS_REGION")
+		}
+		if region == "" {
+			region = os.Getenv("AWS_REGION")
+		}
+		if region == "" {
+			region = os.Getenv("AWS_DEFAULT_REGION")
+		}
+		if region == "" {
+			region = "us-east-1"
+		}
+
+		accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+		if v := os.Getenv("CCRIDER_AWS_ACCESS_KEY_ID"); v != "" {
+			accessKey = v
+		}
+		secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+		if v := os.Getenv("CCRIDER_AWS_SECRET_ACCESS_KEY"); v != "" {
+			secretKey = v
+		}
+		profile := os.Getenv("AWS_PROFILE")
+		if v := os.Getenv("CCRIDER_AWS_PROFILE"); v != "" {
+			profile = v
+		}
+
+		model := summarizeModel
+		if model == "" {
+			model = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+		}
+
+		if autoDetected {
+			fmt.Printf("Using AWS Bedrock (%s, %s) [auto-detected from AWS credentials]\n", model, region)
+			fmt.Printf("  To use Anthropic API instead: set ANTHROPIC_API_KEY and use --provider anthropic\n\n")
+		} else {
+			fmt.Printf("Using AWS Bedrock (%s, %s)\n", model, region)
+		}
+
+		return llm.NewBedrockProvider(ctx, llm.BedrockConfig{
+			Region:          region,
+			ModelID:         model,
+			Profile:         profile,
+			AccessKeyID:     accessKey,
+			SecretAccessKey: secretKey,
+		})
+
+	default:
+		return nil, fmt.Errorf("unknown provider: %s (use 'anthropic' or 'bedrock')", provider)
+	}
 }

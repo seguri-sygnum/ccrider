@@ -18,10 +18,12 @@ type Config struct {
 	ResumePromptTemplate string
 	TerminalCommand      string   // Custom command to spawn terminal (optional)
 	ClaudeFlags          []string // Additional flags to pass to claude --resume
+	LLMProvider          string   // LLM provider for summarization: "anthropic" or "bedrock"
 }
 
 type tomlConfig struct {
 	ClaudeFlags []string `toml:"claude_flags"`
+	LLMProvider string   `toml:"llm_provider"`
 }
 
 // Load reads config from ~/.config/ccrider/
@@ -45,6 +47,7 @@ func Load() (*Config, error) {
 		var tc tomlConfig
 		if _, err := toml.DecodeFile(tomlPath, &tc); err == nil {
 			cfg.ClaudeFlags = tc.ClaudeFlags
+			cfg.LLMProvider = tc.LLMProvider
 		}
 	}
 
