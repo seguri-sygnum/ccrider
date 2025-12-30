@@ -115,28 +115,40 @@ func (s *HierarchicalSummarizer) summarizeDirect(ctx context.Context, projectPat
 	conversationText := formatMessages(messages)
 	projectName := filepath.Base(projectPath)
 
-	prompt := fmt.Sprintf(`Summarize this coding session. Focus on the TOPIC, not what happened.
+	prompt := fmt.Sprintf(`Summarize this coding session. Focus on PROBLEM→SOLUTION, not activities.
 
 Project: %s
 
 Conversation:
 %s
 
+YOUR TASK: Identify the MAIN PROBLEM and how it was SOLVED.
+
+Ask yourself:
+1. What specific problem or bug was being fixed?
+2. What was the root cause?
+3. What was the solution implemented?
+4. Was it completed successfully?
+
 RULES:
-- NO meta-descriptions like "The user worked on..." or "Fixed a bug that..."
-- Include specific identifiers: issue IDs (ENA-1234), table/schema names, function names, error messages
-- Be technical and specific, not vague
-- Lead with the key entity or topic
+- Lead with the PROBLEM and SOLUTION, not activities
+- Include specific technical details: error messages, function names, root causes
+- NO meta-language: "worked on", "investigated", "the user"
+- NO project name prefix (we already know the project)
 
-BAD: "Fixed a migration issue that caused a unique constraint violation"
-GOOD: "ENA-6962: accounts table unique constraint on (company_id, email) - dedupe migration"
+BAD ONE_LINE examples:
+- "Fixed a migration issue that caused errors" (vague)
+- "The user investigated email notification issues" (meta-language)
+- "MyProject: authentication improvements" (includes project name)
 
-BAD: "The user investigated email notification issues"
-GOOD: "Unlinked email notifications: ProposalEmail association logic in email_processor.ex"
+GOOD ONE_LINE examples:
+- "Unique constraint violation on accounts(company_id,email) - added dedupe migration"
+- "ProposalEmail unlinked from notifications - fixed association in email_processor.ex"
+- "API timeout on /users endpoint - added Redis caching layer"
 
 Provide TWO summaries:
-1. ONE_LINE: 60-80 chars. Topic-focused, specific identifiers, no filler words.
-2. FULL: 2-3 paragraphs with technical details, file paths, specific changes.
+1. ONE_LINE: 50-90 chars. Problem→Solution format. Specific. No filler.
+2. FULL: 2-3 paragraphs. What broke, why, how it was fixed, outcome.
 
 Format:
 ONE_LINE: <summary>
@@ -165,13 +177,14 @@ Project: %s
 Conversation:
 %s
 
-RULES:
-- Focus on WHAT was worked on, not that work happened
-- Include specific identifiers: issue IDs, table names, function names, file paths
-- Be technical and specific
-- NO meta-language like "the user" or "the assistant"
+Focus on: What PROBLEM was being addressed? What PROGRESS was made? What was CHANGED?
 
-Provide 1-2 paragraphs covering: specific files changed, functions modified, bugs fixed (with specifics), schema/data changes.`, chunkIndex+1, totalChunks, projectName, conversationText)
+RULES:
+- Be specific: include error messages, function names, file paths
+- NO meta-language: "the user", "the assistant", "worked on"
+- Capture the problem/solution arc, not just activities
+
+Provide 1-2 paragraphs covering: the specific problem being solved, root cause if discovered, changes made, whether this chunk completed the fix or it continues.`, chunkIndex+1, totalChunks, projectName, conversationText)
 
 	response, err := s.provider.GenerateText(ctx, prompt)
 	if err != nil {
@@ -191,25 +204,40 @@ func (s *HierarchicalSummarizer) combineChunks(ctx context.Context, projectPath 
 	combinedChunks := strings.Join(chunkTexts, "\n\n")
 	projectName := filepath.Base(projectPath)
 
-	prompt := fmt.Sprintf(`Combine these summaries into one coherent summary.
+	prompt := fmt.Sprintf(`Synthesize these coding session summaries into a final summary.
 
 Project: %s
 
 Individual Part Summaries:
 %s
 
-RULES:
-- NO meta-descriptions like "The user worked on..." or "This session covered..."
-- Include specific identifiers: issue IDs (ENA-1234), table/schema names, function names
-- Lead with the primary topic or issue
-- Be technical and specific
+YOUR TASK: Identify the MAIN PROBLEM being solved and whether it was SOLVED.
 
-BAD: "Fixed migration issues and investigated email problems"
-GOOD: "ENA-6962: dedupe migration for accounts(company_id,email); email association in ProposalEmail"
+Ask yourself:
+1. What specific problem or bug was the user trying to fix?
+2. What was the root cause discovered?
+3. What was the solution/fix implemented?
+4. Was it successfully completed?
+
+RULES:
+- Lead with the PROBLEM and SOLUTION, not activities
+- Include specific technical details: error messages, function names, root causes
+- NO meta-language: "worked on", "investigated", "the session covered"
+- NO project name prefix (we already know the project)
+
+BAD ONE_LINE examples:
+- "CCRider: fixed session resume exit 131 via Validation" (vague, includes project name)
+- "Fixed migration issues and investigated problems" (no specifics)
+- "Worked on authentication bug fixes" (meta-language)
+
+GOOD ONE_LINE examples:
+- "Pre-flight validation catches asdf/mise failures before claude --resume"
+- "Exit 131 on resume: .tool-versions nodejs mismatch - added ValidateClaudeRunnable()"
+- "TUI stderr corruption from importer warnings - silenced during render"
 
 Provide TWO summaries:
-1. ONE_LINE: 60-80 chars. Primary topic with key identifiers. No filler.
-2. FULL: 2-3 paragraphs synthesizing all technical details, files, changes.
+1. ONE_LINE: 50-90 chars. Problem→Solution format. Specific. No filler.
+2. FULL: 2-3 paragraphs. What broke, why, how it was fixed, outcome.
 
 Format:
 ONE_LINE: <summary>
