@@ -368,7 +368,6 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // highlightQueryInContent highlights query matches in content, line by line
 // Uses currentMatchLine to apply special highlighting to the active match
 
-
 // highlightLineWithOccurrence highlights all occurrences of query in a single line
 // If isCurrent is true, the occurrence at currentOccurrenceIdx gets green+underline, rest get yellow
 func highlightLineWithOccurrence(text, query string, isCurrent bool, currentOccurrenceIdx int) string {
@@ -709,6 +708,15 @@ func openInNewTerminal(sessionID, projectPath, lastCwd, updatedAt, summary strin
 
 		// Resolve working directory (always projectPath, see session.ResolveWorkingDir)
 		workDir := session.ResolveWorkingDir(projectPath, lastCwd)
+
+		// Pre-flight check: verify claude is runnable from this directory
+		if err := session.ValidateClaudeRunnable(workDir); err != nil {
+			return terminalSpawnedMsg{
+				success: false,
+				err:     err,
+				message: err.Error(),
+			}
+		}
 
 		// Create spawner with custom command from config
 		spawner := &terminal.Spawner{

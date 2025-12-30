@@ -165,6 +165,12 @@ func execClaude(sessionID, projectPath, lastCwd, updatedAt, summary string, fork
 		shell = "/bin/bash"
 	}
 
+	// Pre-flight check: verify claude is runnable from this directory
+	if err := session.ValidateClaudeRunnable(workDir); err != nil {
+		spinner.Stop()
+		return err
+	}
+
 	// Exec shell with claude command (replaces current process)
 	// Use -c to run the command, -l to make it a login shell (loads asdf/mise)
 	return syscall.Exec(shell, []string{shell, "-l", "-c", cmd}, os.Environ())
