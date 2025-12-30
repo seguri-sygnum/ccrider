@@ -232,7 +232,7 @@ func (i *Importer) ImportDirectory(dirPath string, progress ProgressCallback) er
 		// Get file info for mtime check
 		fileInfo, err := os.Stat(file)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to stat %s: %v\n", file, err)
+			// Silently skip files we can't stat (broken symlinks, deleted files)
 			continue
 		}
 		fileMtime := fileInfo.ModTime()
@@ -263,12 +263,12 @@ func (i *Importer) ImportDirectory(dirPath string, progress ProgressCallback) er
 		// Parse and import (passing existing message count for incremental import)
 		session, err := ccsessions.ParseFile(file)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to parse %s: %v\n", file, err)
+			// Silently skip unparseable files (corrupted, truncated, etc.)
 			continue
 		}
 
 		if err := i.ImportSession(session, messageCount); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to import %s: %v\n", file, err)
+			// Silently skip files that fail to import
 			continue
 		}
 

@@ -116,8 +116,7 @@ func ParseFile(path string) (session *ParsedSession, err error) {
 		// Parse message entries
 		msg, err := parseMessage(&raw, lineNum)
 		if err != nil {
-			// Log warning but don't fail - some message types we may not support yet
-			fmt.Fprintf(os.Stderr, "Warning: %s line %d: %v\n", path, lineNum, err)
+			// Silently skip unsupported message types
 			continue
 		}
 
