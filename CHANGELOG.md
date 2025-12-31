@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1] - 2024-12-30
+
+### Fixed
+
+- Phrase search now works in TUI (quotes were being stripped)
+- Auto-balance quotes during live typing to prevent FTS5 errors
+- Restored Elvis video to README hero position
+
 ## [0.9.0] - 2024-12-30
 
 ### Added
