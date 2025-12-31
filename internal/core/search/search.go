@@ -188,7 +188,8 @@ func search(database *db.DB, query string, ftsTable string, limit int) ([]Search
 		`, defaultOrderBy), query, limit)
 	} else {
 		// Use FTS5 with snippet for regular queries
-		escapedQuery := query
+		// Balance quotes for live typing - FTS5 errors on unbalanced quotes
+		escapedQuery := balanceQuotes(query)
 
 		sql := fmt.Sprintf(`
 			SELECT
@@ -511,4 +512,14 @@ func filterOnlySessions(database *db.DB, filters SearchFilters) ([]SessionSearch
 	}
 
 	return results, nil
+}
+
+// balanceQuotes ensures quotes are balanced for FTS5 phrase queries
+// If there's an odd number of quotes, adds a closing quote at the end
+func balanceQuotes(query string) string {
+	count := strings.Count(query, "\"")
+	if count%2 != 0 {
+		return query + "\""
+	}
+	return query
 }

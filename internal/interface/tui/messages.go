@@ -45,9 +45,7 @@ type exportCompletedMsg struct {
 
 func performSearch(database *db.DB, query string) tea.Cmd {
 	return func() tea.Msg {
-		// Strip any quotes from the query (user shouldn't need to escape)
-		query = strings.Trim(query, "\"")
-		query = strings.ReplaceAll(query, "\\\"", "\"")
+		// Preserve quotes for phrase searches - FTS5 handles them correctly
 
 		// Parse filters from query (interface concern - normalizing user input)
 		tuiFilters := ParseSearchQuery(query)
