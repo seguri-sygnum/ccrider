@@ -32,6 +32,9 @@ git clone https://github.com/neilberkman/ccrider.git
 cd ccrider
 go build -o ccrider cmd/ccrider/main.go
 sudo mv ccrider /usr/local/bin/
+
+# Install MCP server for all your projects (optional)
+claude mcp add --scope user ccrider $(which ccrider) serve-mcp
 ```
 
 _"Vibe code like ~a king~ The King!"_
