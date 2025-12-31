@@ -6,7 +6,7 @@ Search, browse, and resume your Claude Code sessions. Fast.
 
 You've got months of Claude Code sessions sitting in `~/.claude/projects/`. Finding that conversation where you fixed the authentication bug? Good luck grepping through nested JSON files.
 
-ccrider solves this:
+ccrider solves this - and includes an MCP server so Claude can search your past sessions too.
 
 ```bash
 # Import your sessions once
