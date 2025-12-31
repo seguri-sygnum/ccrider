@@ -2,8 +2,6 @@
 
 Search, browse, and resume your Claude Code sessions. Fast.
 
-**macOS only** - built specifically for Claude Code's session format and macOS clipboard system.
-
 ## Why ccrider?
 
 You've got months of Claude Code sessions sitting in `~/.claude/projects/`. Finding that conversation where you fixed the authentication bug? Good luck grepping through nested JSON files.
