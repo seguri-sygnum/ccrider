@@ -1,7 +1,6 @@
 package search
 
 import (
-	"database/sql"
 	"fmt"
 	"math"
 	"sort"
@@ -159,60 +158,30 @@ func search(database *db.DB, query string, ftsTable string, limit int) ([]Search
 		return nil, fmt.Errorf("search query cannot be empty")
 	}
 
-	// Check if query contains special characters that FTS5 can't handle well
-	// For these, use LIKE instead for exact substring matching
-	hasSpecialChars := strings.ContainsAny(query, "-_@#$%&")
+	// Escape query for FTS5 - wraps each token in quotes to handle special characters
+	escapedQuery := escapeFTS5Query(query)
 
-	var rows *sql.Rows
-	var err error
+	sql := fmt.Sprintf(`
+		SELECT
+			m.uuid,
+			s.session_id,
+			COALESCE(ss.one_line_summary, s.llm_summary, s.summary, ''),
+			snippet(%s, -1, '', '', '...', 64) as snippet,
+			m.timestamp,
+			s.project_path,
+			COALESCE(s.cwd, s.project_path),
+			s.message_count,
+			m.sequence
+		FROM %s
+		JOIN messages m ON %s.rowid = m.id
+		JOIN sessions s ON s.id = m.session_id
+		LEFT JOIN session_summaries ss ON s.id = ss.session_id
+		WHERE %s MATCH ?
+		ORDER BY %s
+		LIMIT ?
+	`, ftsTable, ftsTable, ftsTable, ftsTable, defaultOrderBy)
 
-	if hasSpecialChars {
-		// Use LIKE for exact substring matching with snippet extraction
-		rows, err = database.Query(fmt.Sprintf(`
-			SELECT
-				m.uuid,
-				s.session_id,
-				COALESCE(ss.one_line_summary, s.llm_summary, s.summary, ''),
-				m.text_content,
-				m.timestamp,
-				s.project_path,
-				COALESCE(s.cwd, s.project_path),
-				s.message_count,
-				m.sequence
-			FROM messages m
-			JOIN sessions s ON s.id = m.session_id
-			LEFT JOIN session_summaries ss ON s.id = ss.session_id
-			WHERE m.text_content LIKE '%%' || ? || '%%'
-			ORDER BY %s
-			LIMIT ?
-		`, defaultOrderBy), query, limit)
-	} else {
-		// Use FTS5 with snippet for regular queries
-		// Balance quotes for live typing - FTS5 errors on unbalanced quotes
-		escapedQuery := balanceQuotes(query)
-
-		sql := fmt.Sprintf(`
-			SELECT
-				m.uuid,
-				s.session_id,
-				COALESCE(ss.one_line_summary, s.llm_summary, s.summary, ''),
-				snippet(%s, -1, '', '', '...', 64) as snippet,
-				m.timestamp,
-				s.project_path,
-				COALESCE(s.cwd, s.project_path),
-				s.message_count,
-				m.sequence
-			FROM %s
-			JOIN messages m ON %s.rowid = m.id
-			JOIN sessions s ON s.id = m.session_id
-			LEFT JOIN session_summaries ss ON s.id = ss.session_id
-			WHERE %s MATCH ?
-			ORDER BY %s
-			LIMIT ?
-		`, ftsTable, ftsTable, ftsTable, ftsTable, defaultOrderBy)
-
-		rows, err = database.Query(sql, escapedQuery, limit)
-	}
+	rows, err := database.Query(sql, escapedQuery, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search query failed: %w", err)
 	}
@@ -235,12 +204,6 @@ func search(database *db.DB, query string, ftsTable string, limit int) ([]Search
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
 
-		// For LIKE searches, extract snippet around the match
-		// Keep it short (100 chars) so TUI can show full snippet with match visible
-		if hasSpecialChars {
-			r.MessageText = extractSnippet(r.MessageText, query, 100)
-		}
-
 		results = append(results, r)
 	}
 
@@ -249,177 +212,6 @@ func search(database *db.DB, query string, ftsTable string, limit int) ([]Search
 	}
 
 	return results, nil
-}
-
-// extractSnippet extracts a snippet from text centered around the query match
-// with specified max length. Case-insensitive matching.
-// Handles JSON by extracting just the field containing the match.
-func extractSnippet(text, query string, maxLen int) string {
-	// Find the match position (case-insensitive)
-	lowerText := strings.ToLower(text)
-	lowerQuery := strings.ToLower(query)
-	pos := strings.Index(lowerText, lowerQuery)
-
-	if pos == -1 {
-		// No match found, return beginning of text
-		if len(text) <= maxLen {
-			return text
-		}
-		return text[:maxLen] + "..."
-	}
-
-	// Check if match is inside JSON - look back for {"
-	jsonStart := -1
-	if pos > 0 {
-		// Look for start of JSON object within 500 chars before match
-		for i := pos; i >= 0 && i > pos-500; i-- {
-			if i+1 < len(text) && text[i] == '{' && text[i+1] == '"' {
-				jsonStart = i
-				break
-			}
-		}
-	}
-
-	// If match is in JSON, try to extract just the relevant field value
-	if jsonStart != -1 {
-		// Find the JSON field containing the match
-		// Look backwards from match for the nearest quote that starts a field value
-		fieldStart := -1
-		for i := pos - 1; i > jsonStart; i-- {
-			if text[i] == '"' {
-				// Check if this is the start of a field value (preceded by :" or : ")
-				if i > 0 && text[i-1] == ':' {
-					fieldStart = i + 1
-					break
-				}
-				if i > 1 && text[i-1] == ' ' && text[i-2] == ':' {
-					fieldStart = i + 1
-					break
-				}
-			}
-		}
-
-		if fieldStart != -1 {
-			// Find field end (next unescaped closing quote)
-			fieldEnd := -1
-			escaped := false
-			for i := fieldStart; i < len(text) && i < fieldStart+5000; i++ {
-				if escaped {
-					escaped = false
-					continue
-				}
-				if text[i] == '\\' {
-					escaped = true
-					continue
-				}
-				if text[i] == '"' {
-					fieldEnd = i
-					break
-				}
-			}
-
-			// Extract just this field value, cleaning up newlines
-			if fieldEnd != -1 && fieldEnd-fieldStart < 800 {
-				snippet := text[fieldStart:fieldEnd]
-				// Replace escaped newlines (\\n) and actual newlines with spaces
-				snippet = strings.ReplaceAll(snippet, `\n`, " ")
-				snippet = strings.ReplaceAll(snippet, "\n", " ")
-				// If still too long, truncate around the match
-				if len(snippet) > 400 {
-					matchOffset := pos - fieldStart
-					start := matchOffset - 150
-					if start < 0 {
-						start = 0
-					}
-					end := matchOffset + len(query) + 150
-					if end > len(snippet) {
-						end = len(snippet)
-					}
-					snippet = snippet[start:end]
-					if start > 0 {
-						snippet = "..." + snippet
-					}
-					if end < fieldEnd-fieldStart {
-						snippet = snippet + "..."
-					}
-				}
-				return snippet
-			}
-		}
-	}
-
-	// Not JSON or extraction failed - do standard snippet extraction
-	queryLen := len(query)
-	halfMax := maxLen / 2
-
-	start := pos - halfMax
-	if start < 0 {
-		start = 0
-	}
-
-	end := pos + queryLen + halfMax
-	if end > len(text) {
-		end = len(text)
-	}
-
-	// Adjust to try to break at word/line boundaries
-	if start > 0 {
-		// Look for newline or sentence boundary before start
-		for i := start; i > 0 && i > start-50; i-- {
-			if text[i] == '\n' || (text[i] == '.' && i+1 < len(text) && text[i+1] == ' ') {
-				start = i + 1
-				// Skip leading whitespace
-				for start < len(text) && (text[start] == ' ' || text[start] == '\n') {
-					start++
-				}
-				break
-			}
-		}
-		// If no sentence boundary, look for word boundary
-		if start == pos-halfMax {
-			for i := start; i > 0 && i > start-20; i-- {
-				if text[i] == ' ' {
-					start = i + 1
-					break
-				}
-			}
-		}
-	}
-
-	if end < len(text) {
-		// Look for sentence or line boundary after end
-		for i := end; i < len(text) && i < end+50; i++ {
-			if text[i] == '\n' || (text[i] == '.' && i+1 < len(text) && text[i+1] == ' ') {
-				end = i
-				break
-			}
-		}
-		// If no sentence boundary, look for word boundary
-		if end == pos+queryLen+halfMax {
-			for i := end; i < len(text) && i < end+20; i++ {
-				if text[i] == ' ' {
-					end = i
-					break
-				}
-			}
-		}
-	}
-
-	snippet := text[start:end]
-
-	// Replace escaped newlines (\\n) and actual newlines with spaces
-	snippet = strings.ReplaceAll(snippet, `\n`, " ")
-	snippet = strings.ReplaceAll(snippet, "\n", " ")
-
-	// Add ellipsis if truncated
-	if start > 0 {
-		snippet = "..." + snippet
-	}
-	if end < len(text) {
-		snippet = snippet + "..."
-	}
-
-	return snippet
 }
 
 // calculateRelevanceScore computes a relevance score for a session based on:
@@ -514,12 +306,70 @@ func filterOnlySessions(database *db.DB, filters SearchFilters) ([]SessionSearch
 	return results, nil
 }
 
-// balanceQuotes ensures quotes are balanced for FTS5 phrase queries
-// If there's an odd number of quotes, adds a closing quote at the end
-func balanceQuotes(query string) string {
-	count := strings.Count(query, "\"")
-	if count%2 != 0 {
-		return query + "\""
+// escapeFTS5Query escapes a user query to be safe for FTS5 MATCH.
+// It handles all FTS5 special characters and operators by quoting each token.
+//
+// FTS5 special characters that cause syntax errors include:
+// - Operators: AND, OR, NOT, NEAR
+// - Punctuation: * ^ + : - ( ) { } " ,
+// - Various other chars: . / ? @ # $ % &
+//
+// The proper escaping approach (used by sqlite-utils/datasette):
+// 1. If user explicitly quoted a phrase with "", preserve it as a phrase search
+// 2. Otherwise, split into tokens, escape internal quotes, wrap each in quotes
+// 3. Preserve trailing * for prefix/wildcard queries (FTS5 feature)
+// 4. Join with spaces (implicit AND)
+//
+// Examples:
+//
+//	"hello world" -> `"hello" "world"` (matches both words, any order)
+//	"hello, world" -> `"hello," "world"` (comma preserved in token)
+//	`"exact phrase"` -> `"exact phrase"` (user's phrase preserved)
+//	"test-driven" -> `"test-driven"` (hyphen preserved)
+//	"foo"bar" -> `"foo""bar"` (embedded quote escaped)
+//	"handle*" -> `"handle"*` (wildcard preserved outside quotes)
+func escapeFTS5Query(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return query
 	}
-	return query
+
+	// Check if user explicitly wrapped query in quotes for phrase search
+	// Preserve their intent for exact phrase matching
+	if strings.HasPrefix(query, "\"") && strings.HasSuffix(query, "\"") && len(query) > 2 {
+		// User wants phrase search - escape internal quotes and return
+		inner := query[1 : len(query)-1]
+		escaped := strings.ReplaceAll(inner, "\"", "\"\"")
+		return "\"" + escaped + "\""
+	}
+
+	// Split on whitespace into tokens
+	tokens := strings.Fields(query)
+	if len(tokens) == 0 {
+		return query
+	}
+
+	// Escape each token: replace " with "", wrap in quotes
+	// Preserve trailing * for prefix queries (must be outside quotes for FTS5)
+	var escaped []string
+	for _, token := range tokens {
+		// Check for trailing wildcard
+		hasWildcard := strings.HasSuffix(token, "*")
+		if hasWildcard {
+			token = token[:len(token)-1]
+		}
+
+		// Escape any embedded double quotes
+		token = strings.ReplaceAll(token, "\"", "\"\"")
+
+		// Wrap in double quotes, with wildcard outside if present
+		if hasWildcard {
+			escaped = append(escaped, "\""+token+"\"*")
+		} else {
+			escaped = append(escaped, "\""+token+"\"")
+		}
+	}
+
+	// Join with spaces (FTS5 treats this as implicit AND)
+	return strings.Join(escaped, " ")
 }

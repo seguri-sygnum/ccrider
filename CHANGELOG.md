@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.2] - 2025-01-01
+
+### Fixed
+
+- **FTS5 search now handles all special characters** - queries with commas, hyphens, @, #, and other punctuation no longer cause syntax errors
+  - Previously: `"4 tests, 0 failures"` → FTS5 syntax error
+  - Now: properly escaped and searched
+- Implemented proper FTS5 query escaping (same approach as sqlite-utils/datasette)
+- Removed LIKE fallback for special characters - all searches now use FTS5 with proper escaping
+- Preserved wildcard search functionality (`handle*` still works)
+
 ## [0.9.1] - 2024-12-30
 
 ### Fixed

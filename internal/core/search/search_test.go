@@ -213,6 +213,144 @@ func TestSearchCode(t *testing.T) {
 	})
 }
 
+func TestEscapeFTS5Query(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		// Basic escaping
+		{"single word", "hello", `"hello"`},
+		{"two words", "hello world", `"hello" "world"`},
+		{"multiple words", "one two three", `"one" "two" "three"`},
+
+		// Special characters that previously caused FTS5 syntax errors
+		{"comma in query", "4 tests, 0 failures", `"4" "tests," "0" "failures"`},
+		{"hyphen in word", "test-driven", `"test-driven"`},
+		{"at symbol", "user@example.com", `"user@example.com"`},
+		{"hash symbol", "#hashtag", `"#hashtag"`},
+		{"multiple special chars", "hello, world! @user", `"hello," "world!" "@user"`},
+
+		// Wildcards - must be preserved outside quotes
+		{"trailing wildcard", "handle*", `"handle"*`},
+		{"wildcard with prefix", "test* driven", `"test"* "driven"`},
+
+		// User-specified phrase search (already quoted)
+		{"quoted phrase", `"exact phrase"`, `"exact phrase"`},
+		{"quoted with special", `"hello, world"`, `"hello, world"`},
+
+		// Embedded quotes
+		{"embedded quote", `say "hello"`, `"say" """hello"""`},
+
+		// Edge cases
+		{"empty string", "", ""},
+		{"whitespace only", "   ", ""},
+		{"single asterisk", "*", `""*`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := escapeFTS5Query(tt.input)
+			if result != tt.expected {
+				t.Errorf("escapeFTS5Query(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSearchWithSpecialCharacters(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "test-*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpfile.Name()) }()
+	_ = tmpfile.Close()
+
+	database, err := db.New(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() { _ = database.Close() }()
+
+	// Insert test session
+	result, err := database.Exec(`
+		INSERT INTO sessions (
+			session_id, project_path, summary, created_at, updated_at
+		) VALUES (?, ?, ?, datetime('now'), datetime('now'))
+	`, "test-session-special", "/test/special", "Testing special characters")
+	if err != nil {
+		t.Fatalf("Failed to insert session: %v", err)
+	}
+
+	sessionID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("Failed to get session ID: %v", err)
+	}
+
+	// Insert messages with special characters
+	messages := []struct {
+		uuid    string
+		content string
+	}{
+		{"msg-1", "Running 4 tests, 0 failures in the e2e suite"},
+		{"msg-2", "Contact user@example.com for help"},
+		{"msg-3", "Use test-driven development approach"},
+		{"msg-4", "Check the #hashtag for updates"},
+	}
+
+	for i, msg := range messages {
+		_, err := database.Exec(`
+			INSERT INTO messages (
+				uuid, session_id, type, text_content, timestamp, sequence
+			) VALUES (?, ?, ?, ?, datetime('now'), ?)
+		`, msg.uuid, sessionID, "user", msg.content, i+1)
+		if err != nil {
+			t.Fatalf("Failed to insert message %s: %v", msg.uuid, err)
+		}
+	}
+
+	// Test searches that previously caused FTS5 syntax errors
+	t.Run("CommaInQuery", func(t *testing.T) {
+		results, err := Search(database, "4 tests, 0 failures")
+		if err != nil {
+			t.Fatalf("Search with comma failed: %v", err)
+		}
+		if len(results) == 0 {
+			t.Error("Expected results for query with comma")
+		}
+	})
+
+	t.Run("HyphenInQuery", func(t *testing.T) {
+		results, err := Search(database, "test-driven")
+		if err != nil {
+			t.Fatalf("Search with hyphen failed: %v", err)
+		}
+		if len(results) == 0 {
+			t.Error("Expected results for query with hyphen")
+		}
+	})
+
+	t.Run("AtSymbolInQuery", func(t *testing.T) {
+		results, err := Search(database, "user@example.com")
+		if err != nil {
+			t.Fatalf("Search with @ failed: %v", err)
+		}
+		if len(results) == 0 {
+			t.Error("Expected results for query with @")
+		}
+	})
+
+	t.Run("HashInQuery", func(t *testing.T) {
+		results, err := Search(database, "#hashtag")
+		if err != nil {
+			t.Fatalf("Search with # failed: %v", err)
+		}
+		if len(results) == 0 {
+			t.Error("Expected results for query with #")
+		}
+	})
+}
+
 func TestSearchOrdering(t *testing.T) {
 	tmpfile, err := os.CreateTemp("", "test-*.db")
 	if err != nil {
