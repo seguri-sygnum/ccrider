@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -25,6 +26,8 @@ type SearchSessionsArgs struct {
 	ExcludeCurrent   bool   `json:"exclude_current,omitempty" jsonschema:"description=Exclude current session from results (searches only other sessions)"`
 	AfterDate        string `json:"after_date,omitempty" jsonschema:"description=Only sessions updated after this date (ISO 8601 format, e.g. 2025-01-01)"`
 	BeforeDate       string `json:"before_date,omitempty" jsonschema:"description=Only sessions updated before this date (ISO 8601 format)"`
+	AnchorPhrase     string `json:"anchor_phrase,omitempty" jsonschema:"description=Exact phrase that must exist in the session (used to find current session - pick a unique phrase you just said/saw)"`
+	ExactMatch       bool   `json:"exact_match,omitempty" jsonschema:"description=If true, query is treated as an exact phrase (auto-quoted for you)"`
 }
 
 // GetSessionDetailArgs defines arguments for the get_session_detail tool
@@ -130,7 +133,7 @@ func StartServer(dbPath string) error {
 
 	// Register search_sessions tool
 	searchTool := mcp.NewTool("search_sessions",
-		mcp.WithDescription("Search Claude Code sessions for a query string across all message content. Can search current session only, exclude current session, or search all sessions. Supports date and project filtering."),
+		mcp.WithDescription("Search Claude Code sessions for a query string across all message content. Can search current session only, exclude current session, or search all sessions. Supports date and project filtering.\n\nTO FIND EARLIER CONTEXT IN YOUR CURRENT SESSION (disappeared due to context compaction): Use anchor_phrase with a unique phrase you just said or saw - this identifies your session. Then query searches only within that session. The database syncs before every search so even recent messages are searchable."),
 		mcp.WithString("query",
 			mcp.Required(),
 			mcp.Description("Search term to match against message content")),
@@ -146,6 +149,10 @@ func StartServer(dbPath string) error {
 			mcp.Description("Only sessions updated after this date (ISO 8601 format, e.g. '2025-01-01' or '2025-01-08T10:00:00Z')")),
 		mcp.WithString("before_date",
 			mcp.Description("Only sessions updated before this date (ISO 8601 format)")),
+		mcp.WithString("anchor_phrase",
+			mcp.Description("Exact phrase that must exist in the session. Use this to find your current session: pick a unique phrase you just said or saw, and the search will only return sessions containing that phrase. Combined with recency, this reliably identifies the current conversation.")),
+		mcp.WithBoolean("exact_match",
+			mcp.Description("If true, treats the query as an exact phrase match (auto-quoted). Use this instead of trying to add quotes yourself.")),
 	)
 	s.AddTool(searchTool, makeSearchSessionsHandler(database))
 
@@ -225,9 +232,52 @@ func makeSearchSessionsHandler(database *db.DB) func(context.Context, mcp.CallTo
 			limit = 10
 		}
 
+		// Handle exact_match: wrap query in quotes for phrase search
+		query := args.Query
+		if args.ExactMatch && query != "" && !strings.HasPrefix(query, "\"") {
+			query = "\"" + query + "\""
+		}
+
+		// Handle anchor_phrase: find sessions containing anchor, then filter
+		var anchorSessionIDs map[string]bool
+		if args.AnchorPhrase != "" {
+			// Search for anchor phrase (always exact match)
+			anchorQuery := "\"" + args.AnchorPhrase + "\""
+
+			// Default to last hour if no date filters - most likely to hit current session
+			afterDate := args.AfterDate
+			if afterDate == "" && args.BeforeDate == "" {
+				afterDate = time.Now().Add(-1 * time.Hour).Format(time.RFC3339)
+			}
+
+			anchorFilters := search.SearchFilters{
+				Query:       anchorQuery,
+				ProjectPath: args.Project,
+				AfterDate:   afterDate,
+				BeforeDate:  args.BeforeDate,
+			}
+			anchorResults, err := search.SearchWithFilters(database, anchorFilters)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("anchor search failed: %v", err)), nil
+			}
+			if len(anchorResults) == 0 {
+				// No sessions contain anchor phrase
+				resultJSON, _ := json.Marshal(map[string]interface{}{
+					"sessions": []SessionMatch{},
+					"note":     "No sessions found containing anchor phrase: " + args.AnchorPhrase,
+				})
+				return mcp.NewToolResultText(string(resultJSON)), nil
+			}
+			// Build set of session IDs that contain anchor
+			anchorSessionIDs = make(map[string]bool)
+			for _, s := range anchorResults {
+				anchorSessionIDs[s.SessionID] = true
+			}
+		}
+
 		// Convert MCP args to core filters
 		coreFilters := search.SearchFilters{
-			Query:            args.Query,
+			Query:            query,
 			ProjectPath:      args.Project,
 			CurrentSessionID: args.CurrentSessionID,
 			ExcludeCurrent:   args.ExcludeCurrent,
@@ -244,6 +294,11 @@ func makeSearchSessionsHandler(database *db.DB) func(context.Context, mcp.CallTo
 		// Convert core types to MCP types (interface concern - presentation)
 		var results []SessionMatch
 		for _, coreSession := range coreResults {
+			// If anchor_phrase was used, filter to only sessions that contained it
+			if anchorSessionIDs != nil && !anchorSessionIDs[coreSession.SessionID] {
+				continue
+			}
+
 			result := SessionMatch{
 				SessionID: coreSession.SessionID,
 				Summary:   coreSession.SessionSummary,

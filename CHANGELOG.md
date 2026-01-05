@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4] - 2025-01-04
+
+### Added
+
+- **MCP: anchor_phrase for finding current session** - Claude can now search earlier in its own conversation by providing a unique phrase it just said/saw as an anchor. Defaults to last hour for best accuracy.
+- **MCP: exact_match parameter** - auto-quotes the query for exact phrase matching (no more Claude failing to quote)
+
 ## [0.9.3] - 2025-01-04
 
 ### Fixed
