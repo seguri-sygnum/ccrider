@@ -13,6 +13,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/neilberkman/ccrider/internal/core/db"
+	"github.com/sethvargo/go-diceware/diceware"
 	"github.com/neilberkman/ccrider/internal/core/importer"
 	"github.com/neilberkman/ccrider/internal/core/search"
 )
@@ -28,12 +29,6 @@ type SearchSessionsArgs struct {
 	BeforeDate       string `json:"before_date,omitempty" jsonschema:"description=Only sessions updated before this date (ISO 8601 format)"`
 	AnchorPhrase     string `json:"anchor_phrase,omitempty" jsonschema:"description=Exact phrase that must exist in the session (used to find current session - pick a unique phrase you just said/saw)"`
 	ExactMatch       bool   `json:"exact_match,omitempty" jsonschema:"description=If true, query is treated as an exact phrase (auto-quoted for you)"`
-}
-
-// GetSessionDetailArgs defines arguments for the get_session_detail tool
-type GetSessionDetailArgs struct {
-	SessionID   string `json:"session_id" jsonschema:"description=Session UUID to retrieve,required"`
-	SearchQuery string `json:"search_query,omitempty" jsonschema:"description=Optional search term to find matching messages"`
 }
 
 // ListRecentSessionsArgs defines arguments for the list_recent_sessions tool
@@ -69,19 +64,6 @@ type MatchSnippet struct {
 	MessageType string `json:"message_type"`
 	Snippet     string `json:"snippet"`
 	Sequence    int    `json:"sequence"`
-}
-
-// SessionDetail represents a session with key messages (not full conversation)
-type SessionDetail struct {
-	SessionID        string          `json:"session_id"`
-	Summary          string          `json:"summary"`
-	Project          string          `json:"project"`
-	CreatedAt        string          `json:"created_at"`
-	UpdatedAt        string          `json:"updated_at"`
-	MessageCount     int             `json:"message_count"`
-	FirstMessage     *MessageDetail  `json:"first_message,omitempty"`
-	LastMessage      *MessageDetail  `json:"last_message,omitempty"`
-	MatchingMessages []MessageDetail `json:"matching_messages,omitempty"`
 }
 
 // MessageDetail represents a single message in a session
@@ -156,17 +138,6 @@ func StartServer(dbPath string) error {
 	)
 	s.AddTool(searchTool, makeSearchSessionsHandler(database))
 
-	// Register get_session_detail tool
-	detailTool := mcp.NewTool("get_session_detail",
-		mcp.WithDescription("Retrieve session info with first message, last message, and optionally matching messages for a specific Claude Code session"),
-		mcp.WithString("session_id",
-			mcp.Required(),
-			mcp.Description("Session UUID to retrieve")),
-		mcp.WithString("search_query",
-			mcp.Description("Optional search term to find matching messages in the session")),
-	)
-	s.AddTool(detailTool, makeGetSessionDetailHandler(database))
-
 	// Register list_recent_sessions tool
 	listTool := mcp.NewTool("list_recent_sessions",
 		mcp.WithDescription("Get recent Claude Code sessions, optionally filtered by project"),
@@ -191,6 +162,12 @@ func StartServer(dbPath string) error {
 			mcp.Description("Messages before/after around_sequence (default: 10)")),
 	)
 	s.AddTool(messagesTool, makeGetSessionMessagesHandler(database))
+
+	// Register generate_session_anchor tool
+	anchorTool := mcp.NewTool("generate_session_anchor",
+		mcp.WithDescription("USE THIS when the user asks about something from earlier in THIS conversation that you can't see (context compaction removed it). Generates a unique phrase you say aloud to 'tag' your session, then search for it. Two-step: 1) Call this, say the phrase, ask user to reply 'go', 2) After they reply, search with anchor_phrase to find your session's earlier context."),
+	)
+	s.AddTool(anchorTool, makeGenerateSessionAnchorHandler())
 
 	return server.ServeStdio(s)
 }
@@ -239,6 +216,7 @@ func makeSearchSessionsHandler(database *db.DB) func(context.Context, mcp.CallTo
 		}
 
 		// Handle anchor_phrase: find sessions containing anchor, then filter
+		// Uses retry logic because Claude Code may not have flushed to disk yet
 		var anchorSessionIDs map[string]bool
 		if args.AnchorPhrase != "" {
 			// Search for anchor phrase (always exact match)
@@ -256,15 +234,36 @@ func makeSearchSessionsHandler(database *db.DB) func(context.Context, mcp.CallTo
 				AfterDate:   afterDate,
 				BeforeDate:  args.BeforeDate,
 			}
-			anchorResults, err := search.SearchWithFilters(database, anchorFilters)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("anchor search failed: %v", err)), nil
+
+			// Retry up to 3 times with delays - Claude Code may not have flushed yet
+			var anchorResults []search.SessionSearchResult
+			var lastErr error
+			for attempt := 0; attempt < 3; attempt++ {
+				if attempt > 0 {
+					// Wait before retry, re-sync to pick up any new writes
+					time.Sleep(500 * time.Millisecond)
+					if err := syncDatabase(ctx, database); err != nil {
+						lastErr = err
+						continue
+					}
+				}
+				anchorResults, lastErr = search.SearchWithFilters(database, anchorFilters)
+				if lastErr != nil {
+					continue
+				}
+				if len(anchorResults) > 0 {
+					break // Found it!
+				}
+			}
+
+			if lastErr != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("anchor search failed: %v", lastErr)), nil
 			}
 			if len(anchorResults) == 0 {
-				// No sessions contain anchor phrase
+				// No sessions contain anchor phrase after retries
 				resultJSON, _ := json.Marshal(map[string]interface{}{
 					"sessions": []SessionMatch{},
-					"note":     "No sessions found containing anchor phrase: " + args.AnchorPhrase,
+					"note":     "No sessions found containing anchor phrase after 3 attempts: " + args.AnchorPhrase + ". The phrase may not have been written to disk yet.",
 				})
 				return mcp.NewToolResultText(string(resultJSON)), nil
 			}
@@ -336,83 +335,6 @@ func makeSearchSessionsHandler(database *db.DB) func(context.Context, mcp.CallTo
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(string(resultJSON)), nil
-	}
-}
-
-func makeGetSessionDetailHandler(database *db.DB) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Sync database before running query
-		if err := syncDatabase(ctx, database); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("sync failed: %v", err)), nil
-		}
-
-		var args GetSessionDetailArgs
-		argsBytes, _ := json.Marshal(request.Params.Arguments)
-		if err := json.Unmarshal(argsBytes, &args); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("invalid arguments: %v", err)), nil
-		}
-
-		// Use core function to get full session detail
-		coreDetail, err := database.GetSessionDetail(args.SessionID)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("session not found: %v", err)), nil
-		}
-
-		// Convert to MCP format (interface concern - presentation)
-		session := SessionDetail{
-			SessionID:    coreDetail.SessionID,
-			Summary:      coreDetail.Summary,
-			Project:      coreDetail.ProjectPath,
-			UpdatedAt:    coreDetail.UpdatedAt.Format("2006-01-02 15:04:05"),
-			CreatedAt:    coreDetail.UpdatedAt.Format("2006-01-02 15:04:05"), // Use UpdatedAt as fallback
-			MessageCount: coreDetail.MessageCount,
-		}
-
-		// Extract first and last messages (interface concern - presentation)
-		if len(coreDetail.Messages) > 0 {
-			first := coreDetail.Messages[0]
-			session.FirstMessage = &MessageDetail{
-				Type:      first.Type,
-				Content:   first.Content,
-				Timestamp: first.Timestamp.Format("2006-01-02 15:04:05"),
-				Sequence:  0,
-			}
-
-			last := coreDetail.Messages[len(coreDetail.Messages)-1]
-			session.LastMessage = &MessageDetail{
-				Type:      last.Type,
-				Content:   last.Content,
-				Timestamp: last.Timestamp.Format("2006-01-02 15:04:05"),
-				Sequence:  len(coreDetail.Messages) - 1,
-			}
-		}
-
-		// If search query provided, filter matching messages (interface concern)
-		if args.SearchQuery != "" {
-			session.MatchingMessages = []MessageDetail{}
-			queryLower := strings.ToLower(args.SearchQuery)
-			for i, msg := range coreDetail.Messages {
-				if strings.Contains(strings.ToLower(msg.Content), queryLower) {
-					session.MatchingMessages = append(session.MatchingMessages, MessageDetail{
-						Type:      msg.Type,
-						Content:   msg.Content,
-						Timestamp: msg.Timestamp.Format("2006-01-02 15:04:05"),
-						Sequence:  i,
-					})
-					if len(session.MatchingMessages) >= 5 {
-						break
-					}
-				}
-			}
-		}
-
-		// Return result as JSON
-		resultJSON, err := json.Marshal(session)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 		}
 
 		return mcp.NewToolResultText(string(resultJSON)), nil
@@ -555,6 +477,26 @@ func makeGetSessionMessagesHandler(database *db.DB) func(context.Context, mcp.Ca
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal results: %v", err)), nil
 		}
 
+		return mcp.NewToolResultText(string(resultJSON)), nil
+	}
+}
+
+func makeGenerateSessionAnchorHandler() func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Generate a memorable diceware phrase (4 words)
+		words, err := diceware.Generate(4)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to generate anchor: %v", err)), nil
+		}
+
+		anchor := strings.Join(words, "-")
+
+		result := map[string]string{
+			"anchor":      anchor,
+			"instruction": "SAY THIS EXACT PHRASE: '" + anchor + "' - then ask the user to reply 'go' (this writes your response to disk so it gets indexed). After they reply, call search_sessions with anchor_phrase='" + anchor + "' to find earlier context.",
+		}
+
+		resultJSON, _ := json.Marshal(result)
 		return mcp.NewToolResultText(string(resultJSON)), nil
 	}
 }

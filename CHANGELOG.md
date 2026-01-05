@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.5] - 2025-01-04
+
+### Added
+
+- **MCP: generate_session_anchor tool** - generates a unique diceware phrase Claude says aloud to "tag" its session, then searches with anchor_phrase to find earlier context that disappeared due to context compaction
+- Anchor phrase search now retries up to 3 times with 500ms delays to handle Claude Code write buffering
+
+### Removed
+
+- **MCP: get_session_detail tool** - redundant with search_sessions + get_session_messages
+
 ## [0.9.4] - 2025-01-04
 
 ### Added
