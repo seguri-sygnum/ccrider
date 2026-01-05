@@ -44,7 +44,8 @@ type Model struct {
 	searchInput       textinput.Model
 	searchResults     []searchResult
 	searchSelectedIdx int
-	searchViewOffset  int // First visible result index (for scrolling)
+	searchViewOffset  int    // First visible result index (for scrolling)
+	searchSeq         uint64 // Sequence number to discard stale search results
 
 	// In-session search state
 	inSessionSearch         textinput.Model
@@ -308,7 +309,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case searchResultsMsg:
-		m.searchResults = msg.results
+		// Only accept results if sequence matches current search (discard stale results)
+		if msg.seq == m.searchSeq {
+			m.searchResults = msg.results
+		}
 		return m, nil
 
 	case sessionLaunchedMsg:

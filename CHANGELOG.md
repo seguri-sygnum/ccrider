@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.3] - 2025-01-04
+
+### Fixed
+
+- **Search race condition** - fast typing no longer shows stale results
+  - Previously: typing "hello" quickly could show results for "hell" if that search completed last
+  - Now: sequence numbers ensure only the most recent search results are displayed
+
 ## [0.9.2] - 2025-01-01
 
 ### Fixed

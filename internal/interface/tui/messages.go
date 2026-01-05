@@ -35,6 +35,7 @@ type sessionLaunchInfoMsg struct {
 
 type searchResultsMsg struct {
 	results []searchResult
+	seq     uint64 // Sequence number to match against current search
 }
 
 type exportCompletedMsg struct {
@@ -43,7 +44,7 @@ type exportCompletedMsg struct {
 	err      error
 }
 
-func performSearch(database *db.DB, query string) tea.Cmd {
+func performSearch(database *db.DB, query string, seq uint64) tea.Cmd {
 	return func() tea.Msg {
 		// Preserve quotes for phrase searches - FTS5 handles them correctly
 
@@ -106,7 +107,7 @@ func performSearch(database *db.DB, query string) tea.Cmd {
 			results = results[:50]
 		}
 
-		return searchResultsMsg{results: results}
+		return searchResultsMsg{results: results, seq: seq}
 	}
 }
 

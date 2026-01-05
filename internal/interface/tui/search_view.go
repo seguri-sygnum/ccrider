@@ -57,7 +57,8 @@ func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	query := m.searchInput.Value()
 	m.searchSelectedIdx = 0
 	m.searchViewOffset = 0 // Reset scroll on new search
-	return m, tea.Batch(cmd, performSearch(m.db, query))
+	m.searchSeq++          // Increment sequence to invalidate in-flight searches
+	return m, tea.Batch(cmd, performSearch(m.db, query, m.searchSeq))
 }
 
 func (m Model) viewSearch() string {
