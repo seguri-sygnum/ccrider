@@ -1,5 +1,11 @@
 # ccrider
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/neilberkman/ccrider)](https://goreportcard.com/report/github.com/neilberkman/ccrider)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Release](https://img.shields.io/github/v/release/neilberkman/ccrider)](https://github.com/neilberkman/ccrider/releases)
+[![Homebrew](https://img.shields.io/badge/homebrew-neilberkman%2Ftap-orange)](https://github.com/neilberkman/homebrew-tap)
+[![Show HN](https://img.shields.io/badge/Show%20HN-orange?logo=ycombinator)](https://news.ycombinator.com)
+
 Search, browse, and resume your Claude Code sessions. Fast.
 
 ## Why ccrider?
