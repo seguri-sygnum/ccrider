@@ -63,7 +63,7 @@ release:
 
     **macOS (Homebrew):**
     ```bash
-    brew install neilberkman/ccrider/ccrider
+    brew install neilberkman/tap/ccrider
     ```
 
     **Windows (Scoop):**
@@ -90,7 +90,7 @@ release:
 brews:
   - repository:
       owner: neilberkman
-      name: homebrew-ccrider
+      name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     name: ccrider
