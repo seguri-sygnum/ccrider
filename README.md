@@ -6,7 +6,9 @@
 [![Homebrew](https://img.shields.io/badge/homebrew-neilberkman%2Ftap-orange)](https://github.com/neilberkman/homebrew-tap)
 [![Show HN](https://img.shields.io/badge/Show%20HN-orange?logo=ycombinator)](https://news.ycombinator.com/item?id=46512501)
 
-Search, browse, and resume your Claude Code sessions. Fast.
+Search, browse, and resume your Claude Code sessions.
+
+When Claude Code forgets, tell it: _[see what you have done](#the-king)_.
 
 ## Why ccrider?
 
@@ -43,6 +45,7 @@ sudo mv ccrider /usr/local/bin/
 claude mcp add --scope user ccrider $(which ccrider) serve-mcp
 ```
 
+<a id="the-king"></a>
 _"Vibe code like ~a king~ The King!"_
 
 https://github.com/user-attachments/assets/5b008290-076e-4323-a775-f27f704b1ff2
@@ -139,8 +142,8 @@ Add to your config (`~/Library/Application Support/Claude/claude_desktop_config.
 
 - **search_sessions** - Full-text search across all session content with date/project filters
 - **list_recent_sessions** - Get recent sessions, optionally filtered by project
-- **get_session_detail** - Retrieve session info with first/last messages and optional search
 - **get_session_messages** - Get messages from a session (supports tail mode, context around search matches)
+- **generate_session_anchor** - Generate a unique phrase to tag your session for later retrieval
 
 The MCP server provides read-only access to your session database. Your conversations stay local.
 
