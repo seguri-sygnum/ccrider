@@ -10,17 +10,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	syncForce bool
+)
+
 var syncCmd = &cobra.Command{
 	Use:   "sync [path]",
 	Short: "Import/sync Claude Code sessions",
 	Long: `Import sessions from ~/.claude/projects/ or a specified directory.
 
-Performs incremental sync - only imports new or changed sessions.`,
+Performs incremental sync - only imports new or changed sessions.
+Use --force to re-import all sessions (fixes stale project_path values).`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runSync,
 }
 
 func init() {
+	syncCmd.Flags().BoolVarP(&syncForce, "force", "f", false, "Force re-import of all sessions")
 	rootCmd.AddCommand(syncCmd)
 }
 
@@ -64,7 +70,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	progress := importer.NewProgressReporter(os.Stdout, total)
 
 	// Import
-	if err := imp.ImportDirectory(sourcePath, progress); err != nil {
+	if err := imp.ImportDirectory(sourcePath, progress, syncForce); err != nil {
 		return fmt.Errorf("import failed: %w", err)
 	}
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.9.7] - 2025-01-11
+
+### Fixed
+
+- **project_path not updating on re-import** - sessions imported with wrong project_path (e.g., worktree path instead of main repo) were stuck forever because `ON CONFLICT` didn't update project_path. Now always updates from first message CWD.
+
+### Added
+
+- **`sync --force` flag** - re-imports all sessions regardless of mtime, fixing any stale project_path values
+
+## [0.9.6] - 2025-01-08
+
+### Added
+
+- **Go duration syntax for date filters** - `after:-P1D` (1 day ago), `after:-PT2H` (2 hours ago)
+- Anchor phrase retry increased for better reliability
+
 ## [0.9.5] - 2025-01-04
 
 ### Added

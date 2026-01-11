@@ -76,6 +76,7 @@ func (i *Importer) ImportSession(session *ccsessions.ParsedSession, existingMess
 			file_size, file_mtime
 		) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
+			project_path = excluded.project_path,
 			summary = CASE
 				WHEN excluded.file_mtime > sessions.file_mtime THEN excluded.summary
 				ELSE sessions.summary
@@ -210,7 +211,8 @@ func (i *Importer) ImportSession(session *ccsessions.ParsedSession, existingMess
 }
 
 // ImportDirectory imports all sessions from a directory tree
-func (i *Importer) ImportDirectory(dirPath string, progress ProgressCallback) error {
+// If force is true, re-imports all sessions regardless of mtime
+func (i *Importer) ImportDirectory(dirPath string, progress ProgressCallback, force bool) error {
 	// Find all .jsonl files
 	var files []string
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
@@ -250,7 +252,7 @@ func (i *Importer) ImportDirectory(dirPath string, progress ProgressCallback) er
 			WHERE session_id = ?
 		`, sessionID).Scan(&dbMtime, &messageCount)
 
-		if err == nil && dbMtime.Valid {
+		if err == nil && dbMtime.Valid && !force {
 			// We have this session - check if file changed
 			if !fileMtime.After(dbMtime.Time) {
 				// File hasn't been modified since we last imported - skip

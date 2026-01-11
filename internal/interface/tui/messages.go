@@ -278,7 +278,7 @@ func startSyncWithProgress(database *db.DB, filterByProject bool, projectPath st
 				ch:      progressCh,
 			}
 
-			_ = imp.ImportDirectory(sourcePath, progress)
+			_ = imp.ImportDirectory(sourcePath, progress, false)
 			close(progressCh)
 		}()
 
