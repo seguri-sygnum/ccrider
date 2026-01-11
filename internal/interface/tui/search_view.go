@@ -192,7 +192,7 @@ func (m Model) viewSearch() string {
 		b.WriteString("Type to search (min 2 chars) | esc: back to list | ?: help")
 	}
 	b.WriteString("\n")
-	b.WriteString(searchMetaStyle.Render("Filters: project:path | after:yesterday | after:3-days-ago | before:2024-11-01"))
+	b.WriteString(searchMetaStyle.Render("Filters: project:path | after:3h | after:yesterday | after:3-days-ago | before:2024-11-01"))
 
 	return b.String()
 }

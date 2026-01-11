@@ -81,7 +81,14 @@ func ParseSearchQuery(query string) SearchFilters {
 
 // parseDate attempts to parse a date string using natural language parsing
 func parseDate(w *when.Parser, dateStr string) *time.Time {
-	// Try standard date formats FIRST (before natural language)
+	// Try Go duration format FIRST (3h, 30m, 2h30m, etc.)
+	// This allows users to use familiar Go duration syntax
+	if duration, err := time.ParseDuration(dateStr); err == nil {
+		t := time.Now().Add(-duration) // Subtract duration to go back in time
+		return &t
+	}
+
+	// Try standard date formats (before natural language)
 	// This prevents "2024-11-01" from being parsed as time "11:01"
 	formats := []string{
 		"2006-01-02",

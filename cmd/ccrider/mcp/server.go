@@ -235,13 +235,13 @@ func makeSearchSessionsHandler(database *db.DB) func(context.Context, mcp.CallTo
 				BeforeDate:  args.BeforeDate,
 			}
 
-			// Retry up to 3 times with delays - Claude Code may not have flushed yet
+			// Retry up to 5 times with delays - Claude Code may not have flushed yet
 			var anchorResults []search.SessionSearchResult
 			var lastErr error
-			for attempt := 0; attempt < 3; attempt++ {
+			for attempt := 0; attempt < 5; attempt++ {
 				if attempt > 0 {
 					// Wait before retry, re-sync to pick up any new writes
-					time.Sleep(500 * time.Millisecond)
+					time.Sleep(1 * time.Second)
 					if err := syncDatabase(ctx, database); err != nil {
 						lastErr = err
 						continue
@@ -263,7 +263,7 @@ func makeSearchSessionsHandler(database *db.DB) func(context.Context, mcp.CallTo
 				// No sessions contain anchor phrase after retries
 				resultJSON, _ := json.Marshal(map[string]interface{}{
 					"sessions": []SessionMatch{},
-					"note":     "No sessions found containing anchor phrase after 3 attempts: " + args.AnchorPhrase + ". The phrase may not have been written to disk yet.",
+					"note":     "No sessions found containing anchor phrase after 5 attempts (~5s): " + args.AnchorPhrase + ". The phrase may not have been written to disk yet.",
 				})
 				return mcp.NewToolResultText(string(resultJSON)), nil
 			}
