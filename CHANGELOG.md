@@ -5,16 +5,26 @@
 ### Fixed
 
 - **project_path not updating on re-import** - sessions imported with wrong project_path (e.g., worktree path instead of main repo) were stuck forever because `ON CONFLICT` didn't update project_path. Now always updates from first message CWD.
+- **Date filter comparison** - fixed timestamp format mismatch that caused date filters to fail
 
 ### Added
 
 - **`sync --force` flag** - re-imports all sessions regardless of mtime, fixing any stale project_path values
+- **CLI date filters** - CLI search now supports same filters as TUI: `after:`, `before:`, `date:`, `project:`
+
+### Changed
+
+- **Centralized filter parsing** - date/project filters moved to core, shared by TUI and CLI
+- Supported date formats:
+  - Go duration: `after:3h`, `after:24h`, `after:168h` (hours ago)
+  - Natural language: `after:yesterday`, `after:tomorrow`, `before:today`
+  - Relative: `after:3-days-ago`, `before:last-week`
+  - ISO 8601: `after:2024-01-15`, `before:2024-01-15T10:30:00`
 
 ## [0.9.6] - 2025-01-08
 
 ### Added
 
-- **Go duration syntax for date filters** - `after:-P1D` (1 day ago), `after:-PT2H` (2 hours ago)
 - Anchor phrase retry increased for better reliability
 
 ## [0.9.5] - 2025-01-04

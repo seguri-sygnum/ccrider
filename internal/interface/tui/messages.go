@@ -46,30 +46,11 @@ type exportCompletedMsg struct {
 
 func performSearch(database *db.DB, query string, seq uint64) tea.Cmd {
 	return func() tea.Msg {
-		// Preserve quotes for phrase searches - FTS5 handles them correctly
+		// Parse filters from query using centralized core parser
+		filters := search.ParseQuery(query)
 
-		// Parse filters from query (interface concern - normalizing user input)
-		tuiFilters := ParseSearchQuery(query)
-		searchQuery := tuiFilters.Query
-
-		// If we have filters but no query text, that's fine - search will return
-		// empty results which is appropriate (need both filters AND search text)
-		// Don't fall back to raw query as it would try to FTS search "after:yesterday"
-
-		// Convert TUI filters to core filters
-		coreFilters := search.SearchFilters{
-			Query:       searchQuery,
-			ProjectPath: tuiFilters.Project,
-		}
-		if tuiFilters.HasAfter {
-			coreFilters.AfterDate = tuiFilters.AfterDate.Format(time.RFC3339)
-		}
-		if tuiFilters.HasBefore {
-			coreFilters.BeforeDate = tuiFilters.BeforeDate.Format(time.RFC3339)
-		}
-
-		// Call core search with filters (business logic in core)
-		coreResults, err := search.SearchWithFilters(database, coreFilters)
+		// Call core search with filters
+		coreResults, err := search.SearchWithFilters(database, filters)
 		if err != nil {
 			return errMsg{err}
 		}

@@ -49,12 +49,8 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		_ = database.Close()
 	}()
 
-	// Use unified search backend (same as TUI/MCP)
-	filters := search.SearchFilters{
-		Query: query,
-		// CLI doesn't support project/date filters yet, but using unified backend
-		// means we can add them easily later
-	}
+	// Parse query for filters (project:, after:, before:, date:)
+	filters := search.ParseQuery(query)
 
 	sessionResults, err := search.SearchWithFilters(database, filters)
 	if err != nil {

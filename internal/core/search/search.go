@@ -96,12 +96,20 @@ func SearchWithFilters(database *db.DB, filters SearchFilters) ([]SessionSearchR
 			continue
 		}
 
-		// Filter by date range
-		if filters.AfterDate != "" && result.Timestamp < filters.AfterDate {
-			continue
+		// Filter by date range (parse timestamps for proper comparison)
+		if filters.AfterDate != "" {
+			afterTime, _ := time.Parse(time.RFC3339, filters.AfterDate)
+			resultTime := parseDBTimestamp(result.Timestamp)
+			if resultTime.Before(afterTime) {
+				continue
+			}
 		}
-		if filters.BeforeDate != "" && result.Timestamp > filters.BeforeDate {
-			continue
+		if filters.BeforeDate != "" {
+			beforeTime, _ := time.Parse(time.RFC3339, filters.BeforeDate)
+			resultTime := parseDBTimestamp(result.Timestamp)
+			if resultTime.After(beforeTime) {
+				continue
+			}
 		}
 
 		// Group by session
@@ -268,22 +276,24 @@ func filterOnlySessions(database *db.DB, filters SearchFilters) ([]SessionSearch
 		query += " AND s.project_path LIKE '%' || ? || '%'"
 		args = append(args, filters.ProjectPath)
 	}
-	if filters.AfterDate != "" {
-		query += " AND s.updated_at >= ?"
-		args = append(args, filters.AfterDate)
-	}
-	if filters.BeforeDate != "" {
-		query += " AND s.updated_at <= ?"
-		args = append(args, filters.BeforeDate)
-	}
+	// Date filtering done in Go due to timestamp format inconsistencies
 
-	query += " ORDER BY s.updated_at DESC LIMIT 100"
+	query += " ORDER BY s.updated_at DESC LIMIT 500" // Fetch more, filter in Go
 
 	rows, err := database.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("filter query failed: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
+
+	// Parse filter dates once
+	var afterTime, beforeTime time.Time
+	if filters.AfterDate != "" {
+		afterTime, _ = time.Parse(time.RFC3339, filters.AfterDate)
+	}
+	if filters.BeforeDate != "" {
+		beforeTime, _ = time.Parse(time.RFC3339, filters.BeforeDate)
+	}
 
 	var results []SessionSearchResult
 	for rows.Next() {
@@ -298,9 +308,29 @@ func filterOnlySessions(database *db.DB, filters SearchFilters) ([]SessionSearch
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
+
+		// Apply date filters in Go
+		if filters.AfterDate != "" {
+			sessionTime := parseDBTimestamp(r.UpdatedAt)
+			if sessionTime.Before(afterTime) {
+				continue
+			}
+		}
+		if filters.BeforeDate != "" {
+			sessionTime := parseDBTimestamp(r.UpdatedAt)
+			if sessionTime.After(beforeTime) {
+				continue
+			}
+		}
+
 		// No matches for filter-only results
 		r.Matches = []SearchResult{}
 		results = append(results, r)
+
+		// Limit to 100 after filtering
+		if len(results) >= 100 {
+			break
+		}
 	}
 
 	return results, nil
@@ -372,4 +402,29 @@ func escapeFTS5Query(query string) string {
 
 	// Join with spaces (FTS5 treats this as implicit AND)
 	return strings.Join(escaped, " ")
+}
+
+// parseDBTimestamp parses timestamps from the database which may be in various formats
+func parseDBTimestamp(ts string) time.Time {
+	// Try RFC3339 first (standard)
+	if t, err := time.Parse(time.RFC3339, ts); err == nil {
+		return t
+	}
+	// Try Go's default format (what the DB stores: "2006-01-02 15:04:05.999 -0700 MST")
+	if t, err := time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", ts); err == nil {
+		return t
+	}
+	// Try without fractional seconds
+	if t, err := time.Parse("2006-01-02 15:04:05 -0700 MST", ts); err == nil {
+		return t
+	}
+	// Try with +0000 UTC format
+	if t, err := time.Parse("2006-01-02 15:04:05.999 +0000 UTC", ts); err == nil {
+		return t
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05 +0000 UTC", ts); err == nil {
+		return t
+	}
+	// Fallback: return zero time
+	return time.Time{}
 }
