@@ -6,7 +6,7 @@
 [![Homebrew](https://img.shields.io/badge/homebrew-neilberkman%2Ftap-orange)](https://github.com/neilberkman/homebrew-tap)
 [![Show HN](https://img.shields.io/badge/Show%20HN-orange?logo=ycombinator)](https://news.ycombinator.com/item?id=46512501)
 
-Search, browse, and resume your Claude Code sessions.
+Search, browse, and resume your Claude Code sessions, plus MCP server to remember past context.
 
 When Claude Code forgets, tell it: _[see what you have done](#the-king)_.
 
