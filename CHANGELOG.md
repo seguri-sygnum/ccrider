@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.9.8] - 2026-01-12
+
+### Added
+
+- **Session recovery mode** - when a session file has been deleted by Claude Code but CCRider still has the conversation indexed, CCRider can start a new session with context from the old one. Prompts user to confirm, checks for CCRider MCP server, and falls back to asking for directory if original paths don't exist.
+
 ## [0.9.7] - 2025-01-11
 
 ### Fixed

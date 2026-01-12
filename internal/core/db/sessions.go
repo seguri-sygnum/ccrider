@@ -259,6 +259,101 @@ type SessionMessage struct {
 	Sequence  int
 }
 
+// RecoveryContext contains information needed to start a recovery session
+// when the original session file is missing
+type RecoveryContext struct {
+	SessionID    string
+	Summary      string
+	ProjectPath  string
+	LastCwd      string
+	MessageCount int
+	UpdatedAt    time.Time
+	FirstMsgs    []SessionMessage // First N messages for context
+	LastMsgs     []SessionMessage // Last N messages for context
+}
+
+// GetRecoveryContext retrieves context from an old session for recovery mode.
+// This is used when the session file is missing but we have data in CCRider's database.
+func (db *DB) GetRecoveryContext(sessionID string, contextMsgs int) (*RecoveryContext, error) {
+	if contextMsgs <= 0 {
+		contextMsgs = 5
+	}
+
+	// Get session metadata
+	session, lastCwd, err := db.GetSessionLaunchInfo(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx := &RecoveryContext{
+		SessionID:    session.SessionID,
+		Summary:      session.Summary,
+		ProjectPath:  session.ProjectPath,
+		LastCwd:      lastCwd,
+		MessageCount: session.MessageCount,
+		UpdatedAt:    session.UpdatedAt,
+	}
+
+	// Get first N messages
+	firstQuery := `
+		SELECT type, sender, text_content, timestamp, sequence
+		FROM messages
+		WHERE session_id = (SELECT id FROM sessions WHERE session_id = ?)
+		ORDER BY sequence ASC
+		LIMIT ?
+	`
+	rows, err := db.Query(firstQuery, sessionID, contextMsgs)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var msg SessionMessage
+		if err := rows.Scan(&msg.Type, &msg.Sender, &msg.Content, &msg.Timestamp, &msg.Sequence); err != nil {
+			return nil, err
+		}
+		ctx.FirstMsgs = append(ctx.FirstMsgs, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Get last N messages (different from first)
+	lastQuery := `
+		SELECT type, sender, text_content, timestamp, sequence
+		FROM messages
+		WHERE session_id = (SELECT id FROM sessions WHERE session_id = ?)
+		ORDER BY sequence DESC
+		LIMIT ?
+	`
+	rows2, err := db.Query(lastQuery, sessionID, contextMsgs)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows2.Close() }()
+
+	var lastMsgs []SessionMessage
+	for rows2.Next() {
+		var msg SessionMessage
+		if err := rows2.Scan(&msg.Type, &msg.Sender, &msg.Content, &msg.Timestamp, &msg.Sequence); err != nil {
+			return nil, err
+		}
+		lastMsgs = append(lastMsgs, msg)
+	}
+	if err := rows2.Err(); err != nil {
+		return nil, err
+	}
+
+	// Reverse to get chronological order
+	for i, j := 0, len(lastMsgs)-1; i < j; i, j = i+1, j-1 {
+		lastMsgs[i], lastMsgs[j] = lastMsgs[j], lastMsgs[i]
+	}
+	ctx.LastMsgs = lastMsgs
+
+	return ctx, nil
+}
+
 // GetSessionMessagesOptions specifies filtering options for GetSessionMessages
 type GetSessionMessagesOptions struct {
 	LastN          int // Return last N messages (tail mode)

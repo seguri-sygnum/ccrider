@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -79,4 +80,30 @@ Suggested fixes:
 	}
 
 	return fmt.Errorf("claude command failed in %s: %w", workDir, err)
+}
+
+// SessionFileExists checks if the Claude Code session file exists on disk.
+// Claude stores sessions in ~/.claude/projects/<encoded-project-path>/<session-id>.jsonl
+func SessionFileExists(sessionID, projectPath string) bool {
+	filePath := GetSessionFilePath(sessionID, projectPath)
+	if filePath == "" {
+		return false
+	}
+	_, err := os.Stat(filePath)
+	return err == nil
+}
+
+// GetSessionFilePath returns the expected path to a Claude Code session file.
+// Returns empty string if home directory cannot be determined.
+func GetSessionFilePath(sessionID, projectPath string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	// Claude encodes project paths by replacing / with -
+	// e.g., /Users/neil/enaia/enaia -> -Users-neil-enaia-enaia
+	encodedPath := strings.ReplaceAll(projectPath, "/", "-")
+
+	return filepath.Join(home, ".claude", "projects", encodedPath, sessionID+".jsonl")
 }
