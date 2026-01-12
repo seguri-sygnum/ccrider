@@ -219,7 +219,7 @@ func execClaudeRecovery(sessionID, projectPath, lastCwd, updatedAt, summary stri
 	// Prompt user to continue
 	fmt.Fprintf(os.Stderr, "Continue with recovery session? [Y/n] ")
 	var response string
-	fmt.Scanln(&response)
+	_, _ = fmt.Scanln(&response)
 	response = strings.ToLower(strings.TrimSpace(response))
 	if response != "" && response != "y" && response != "yes" {
 		fmt.Fprintf(os.Stderr, "Aborted.\n")
@@ -253,7 +253,7 @@ func execClaudeRecovery(sessionID, projectPath, lastCwd, updatedAt, summary stri
 		}
 		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "Enter directory to start session in (or press Enter for current dir): ")
-		fmt.Scanln(&workDir)
+		_, _ = fmt.Scanln(&workDir)
 		workDir = strings.TrimSpace(workDir)
 
 		if workDir == "" {
